@@ -1,0 +1,125 @@
+{
+  "entities": {
+    "Branch": {
+      "title": "Branch",
+      "description": "Tabel Cabang Laundry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" }
+      },
+      "required": ["id", "name", "address", "phone"]
+    },
+    "Service": {
+      "title": "Service",
+      "description": "Tabel Layanan yang Dapat Dikonfigurasi",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string", "enum": ["kiloan", "satuan"] },
+        "price": { "type": "number" },
+        "unit": { "type": "string" },
+        "estimateHours": { "type": "integer" },
+        "isActive": { "type": "boolean" },
+        "promiseName": { "type": "string" },
+        "promiseDurationText": { "type": "string" }
+      },
+      "required": ["id", "name", "category", "price", "unit", "estimateHours", "isActive"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Tabel Pelanggan CRM",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "depositBalance": { "type": "number" },
+        "loyaltyPoints": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastActive": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "phone", "depositBalance", "loyaltyPoints", "createdAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Tabel Transaksi Utama Laundry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "invoiceNumber": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "branchId": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["Cash", "QRIS", "Transfer", "Deposit"] },
+        "paymentStatus": { "type": "string", "enum": ["Lunas", "Belum Lunas"] },
+        "status": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "estimatedCompletion": { "type": "string", "format": "date-time" },
+        "pointsEarned": { "type": "integer" }
+      },
+      "required": ["id", "invoiceNumber", "customerId", "customerName", "customerPhone", "branchId", "totalAmount", "paymentMethod", "paymentStatus", "status", "createdAt", "updatedAt", "estimatedCompletion", "pointsEarned"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Tabel Pengeluaran Laundry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "amount": { "type": "number" },
+        "branchId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "recordedBy": { "type": "string" }
+      },
+      "required": ["id", "description", "category", "amount", "branchId", "date", "recordedBy"]
+    },
+    "SystemSettings": {
+      "title": "SystemSettings",
+      "description": "Tabel Pengaturan Sistem Laundry",
+      "type": "object",
+      "properties": {
+        "logoUrl": { "type": "string" },
+        "pointsMultiplier": { "type": "number" },
+        "pointsValue": { "type": "number" },
+        "bluetoothPrinterAddress": { "type": "string" }
+      },
+      "required": ["logoUrl", "pointsMultiplier", "pointsValue", "bluetoothPrinterAddress"]
+    }
+  },
+  "firestore": {
+    "/branches/{branchId}": {
+      "schema": "Branch",
+      "description": "Koleksi cabang laundry"
+    },
+    "/services/{serviceId}": {
+      "schema": "Service",
+      "description": "Koleksi variasi layanan"
+    },
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Koleksi pelanggan CRM"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Koleksi transaksi order laundry"
+    },
+    "/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Koleksi pengeluaran laundry"
+    },
+    "/settings/{settingId}": {
+      "schema": "SystemSettings",
+      "description": "Koleksi pengaturan sistem"
+    }
+  }
+}
