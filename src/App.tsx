@@ -30,9 +30,27 @@ export default function App() {
   const [isAndroidApp] = useState<boolean>(() => {
     return Capacitor.isNativePlatform() || window.location.search.includes('platform=android');
   });
+  const [isTrackingOnly] = useState<boolean>(() => {
+    // Detect if Vercel tracking-only mode is active
+    const isVercel = window.location.hostname.includes('vercel.app') || window.location.hostname.includes('vercel');
+    const envTracking = (import.meta as any).env?.VITE_TRACKING_ONLY === 'true';
+    const queryTracking = window.location.search.includes('mode=tracking');
+    // Staff/Android is never tracking-only
+    const isApp = Capacitor.isNativePlatform() || window.location.search.includes('platform=android');
+    if (isApp) return false;
+    return isVercel || envTracking || queryTracking;
+  });
   const [activeConsole, setActiveConsole] = useState<'owner' | 'karyawan' | 'pelanggan'>(() => {
     const isApp = Capacitor.isNativePlatform() || window.location.search.includes('platform=android');
-    return isApp ? 'karyawan' : 'owner';
+    if (isApp) return 'karyawan';
+    
+    const isVercel = window.location.hostname.includes('vercel.app') || window.location.hostname.includes('vercel');
+    const envTracking = (import.meta as any).env?.VITE_TRACKING_ONLY === 'true';
+    const queryTracking = window.location.search.includes('mode=tracking');
+    if (isVercel || envTracking || queryTracking) {
+      return 'pelanggan';
+    }
+    return 'owner';
   });
   const [currentTime, setCurrentTime] = useState<string>('');
   const [isSyncing, setIsSyncing] = useState<boolean>(true);
@@ -191,18 +209,18 @@ export default function App() {
                   LaughDry
                 </span>
                 <span className="text-[10px] bg-slate-500/20 text-[#38BDF8] font-bold px-1.5 py-0.5 rounded uppercase border border-slate-500/30">
-                  {isAndroidApp ? 'Android App v2.0' : 'Kita v2.0'}
+                  {isAndroidApp ? 'Android App v2.0' : isTrackingOnly ? 'Tracking Online' : 'Kita v2.0'}
                 </span>
               </div>
               <p className="text-[10.5px] text-slate-400 font-medium">
-                {isAndroidApp ? 'Aplikasi POS Layanan & Absensi Toko' : 'Sistem POS & Analitik Laundry Kelas Dunia'}
+                {isAndroidApp ? 'Aplikasi POS Layanan & Absensi Toko' : isTrackingOnly ? 'Lacak Status Cucian Laundry Anda Secara Instan' : 'Sistem POS & Analitik Laundry Kelas Dunia'}
               </p>
             </div>
           </div>
 
           {/* Real-time system log details */}
           <div className="flex items-center gap-5 text-xs text-slate-400">
-            {pendingSyncCount > 0 && (
+            {!isTrackingOnly && pendingSyncCount > 0 && (
               <button
                 type="button"
                 onClick={async () => {
@@ -221,12 +239,14 @@ export default function App() {
               </button>
             )}
 
-            <div className="hidden lg:flex items-center gap-1.5 font-mono">
-              <span className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-amber-400 animate-pulse' : 'bg-green-400'}`}></span>
-              <span className="text-[11px] font-bold uppercase text-slate-200">
-                {isSyncing ? 'Firestore: Menyelaraskan...' : 'Firestore: Aktif & Sinkron'}
-              </span>
-            </div>
+            {!isTrackingOnly && (
+              <div className="hidden lg:flex items-center gap-1.5 font-mono">
+                <span className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-amber-400 animate-pulse' : 'bg-green-400'}`}></span>
+                <span className="text-[11px] font-bold uppercase text-slate-200">
+                  {isSyncing ? 'Firestore: Menyelaraskan...' : 'Firestore: Aktif & Sinkron'}
+                </span>
+              </div>
+            )}
 
             <div className="flex items-center gap-1.5 bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700/50">
               <Clock className="w-3.5 h-3.5 text-sky-400" />
@@ -248,65 +268,67 @@ export default function App() {
       </header>
 
       {/* Navigation Portal Switcher Strip */}
-      <div className="bg-white border-b border-slate-200 py-3.5 px-4 md:px-8 shadow-sm">
-        <div className="max-w-7xl mx-auto flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="space-y-0.5">
-            <strong className="text-slate-800 text-xs font-black uppercase tracking-wider block">Pilih Portal Akses:</strong>
-            <p className="text-[11px] text-slate-400 select-none">
-              {isAndroidApp 
-                ? 'Portal Android aktif. Kelola pesanan baru, catat pengeluaran, lakukan absensi, atau pantau performa bisnis sebagai owner.'
-                : 'Pilih menu layanan di bawah ini untuk mengakses Dasbor Owner, Aplikasi POS Karyawan Kasir, atau Portal Pelacakan Mandiri Pelanggan.'}
-            </p>
-          </div>
+      {!isTrackingOnly && (
+        <div className="bg-white border-b border-slate-200 py-3.5 px-4 md:px-8 shadow-sm">
+          <div className="max-w-7xl mx-auto flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <strong className="text-slate-800 text-xs font-black uppercase tracking-wider block">Pilih Portal Akses:</strong>
+              <p className="text-[11px] text-slate-400 select-none">
+                {isAndroidApp 
+                  ? 'Portal Android aktif. Kelola pesanan baru, catat pengeluaran, lakukan absensi, atau pantau performa bisnis sebagai owner.'
+                  : 'Pilih menu layanan di bawah ini untuk mengakses Dasbor Owner, Aplikasi POS Karyawan Kasir, atau Portal Pelacakan Mandiri Pelanggan.'}
+              </p>
+            </div>
 
-          {/* Action Selector Grid Tab */}
-          <div className={`grid ${isAndroidApp ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'} gap-2 w-full lg:w-auto`}>
-            {/* Owner Button */}
-            <button
-              onClick={() => setActiveConsole('owner')}
-              className={`flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-xl text-xs font-bold transition-all ${
-                activeConsole === 'owner'
-                  ? 'bg-[#1E293B] text-[#38BDF8] shadow-md shadow-[#38BDF8]/10 scale-[1.02]'
-                  : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'
-              }`}
-              id="role-switch-owner"
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              Dasbor Owner
-            </button>
-
-            {/* Employee/Kasir Button */}
-            <button
-              onClick={() => setActiveConsole('karyawan')}
-              className={`flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-xl text-xs font-bold transition-all ${
-                activeConsole === 'karyawan'
-                  ? 'bg-[#1E293B] text-[#38BDF8] shadow-md shadow-[#38BDF8]/10 scale-[1.02]'
-                  : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'
-              }`}
-              id="role-switch-employee"
-            >
-              <Smartphone className="w-4 h-4" />
-              POS Karyawan
-            </button>
-
-            {/* Customer Tracking Button - Web only */}
-            {!isAndroidApp && (
+            {/* Action Selector Grid Tab */}
+            <div className={`grid ${isAndroidApp ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'} gap-2 w-full lg:w-auto`}>
+              {/* Owner Button */}
               <button
-                onClick={() => setActiveConsole('pelanggan')}
-                className={`flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-xl text-xs font-bold transition-all md:col-span-1 col-span-2 ${
-                  activeConsole === 'pelanggan'
+                onClick={() => setActiveConsole('owner')}
+                className={`flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-xl text-xs font-bold transition-all ${
+                  activeConsole === 'owner'
                     ? 'bg-[#1E293B] text-[#38BDF8] shadow-md shadow-[#38BDF8]/10 scale-[1.02]'
                     : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'
                 }`}
-                id="role-switch-customer"
+                id="role-switch-owner"
               >
-                <Globe className="w-4 h-4" />
-                Situs Tracking
+                <LayoutDashboard className="w-4 h-4" />
+                Dasbor Owner
               </button>
-            )}
+
+              {/* Employee/Kasir Button */}
+              <button
+                onClick={() => setActiveConsole('karyawan')}
+                className={`flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-xl text-xs font-bold transition-all ${
+                  activeConsole === 'karyawan'
+                    ? 'bg-[#1E293B] text-[#38BDF8] shadow-md shadow-[#38BDF8]/10 scale-[1.02]'
+                    : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'
+                }`}
+                id="role-switch-employee"
+              >
+                <Smartphone className="w-4 h-4" />
+                POS Karyawan
+              </button>
+
+              {/* Customer Tracking Button - Web only */}
+              {!isAndroidApp && (
+                <button
+                  onClick={() => setActiveConsole('pelanggan')}
+                  className={`flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-xl text-xs font-bold transition-all md:col-span-1 col-span-2 ${
+                    activeConsole === 'pelanggan'
+                      ? 'bg-[#1E293B] text-[#38BDF8] shadow-md shadow-[#38BDF8]/10 scale-[1.02]'
+                      : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'
+                  }`}
+                  id="role-switch-customer"
+                >
+                  <Globe className="w-4 h-4" />
+                  Situs Tracking
+                </button>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Main Container Viewport */}
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 md:px-8 py-6">
