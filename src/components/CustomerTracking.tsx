@@ -34,9 +34,69 @@ export default function CustomerTracking() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showStampCardModal, setShowStampCardModal] = useState(false);
 
-  // Ready for user search inputs
+  // Ready for user search inputs / URL auto-login
   useEffect(() => {
-    // Left clean for users to enter their own phone number manually
+    const performAutoLookup = () => {
+      const queryParams = new URLSearchParams(window.location.search);
+      const phoneParam = queryParams.get('phone');
+      const invoiceParam = queryParams.get('invoice');
+      
+      let targetPhone = phoneParam || '';
+      
+      if (!targetPhone && invoiceParam) {
+        const allOrders = LaughDryDatabase.getOrders();
+        const foundOrder = allOrders.find(o => o.invoiceNumber === invoiceParam);
+        if (foundOrder) {
+          targetPhone = foundOrder.customerPhone;
+        }
+      }
+      
+      if (targetPhone) {
+        setPhoneSearch(targetPhone);
+        
+        const custs = LaughDryDatabase.getCustomers();
+        const found = custs.find(c => c.phone === targetPhone);
+        if (found) {
+          setCustomer(found);
+          const allOrders = LaughDryDatabase.getOrders();
+          const userOrders = allOrders.filter(o => o.customerId === found.id);
+          
+          const active = userOrders.filter(o => o.status !== OrderStatus.SELESAI && o.status !== OrderStatus.DIBATALKAN);
+          const history = userOrders.filter(o => o.status === OrderStatus.SELESAI || o.status === OrderStatus.DIBATALKAN);
+          
+          setActiveOrders(active);
+          setCompletedHistory(history);
+          setToastMessage(`👋 Halo ${found.name}! Informasi cucian Anda berhasil dimuat secara instan.`);
+          setTimeout(() => setToastMessage(null), 3000);
+          return true; // Successfully found and loaded
+        }
+      }
+      return false;
+    };
+
+    // Try immediately
+    const success = performAutoLookup();
+    
+    // If database wasn't synced yet, listen to custom sync events to retry
+    const handleDbSynced = () => {
+      performAutoLookup();
+    };
+
+    window.addEventListener('laughdry_db_synced', handleDbSynced);
+    
+    // As a solid fallback, also try twice after short intervals
+    const timer1 = setTimeout(() => {
+      performAutoLookup();
+    }, 500);
+    const timer2 = setTimeout(() => {
+      performAutoLookup();
+    }, 1500);
+
+    return () => {
+      window.removeEventListener('laughdry_db_synced', handleDbSynced);
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+    };
   }, []);
 
   const lookupCustomerDataByPhone = (phone: string) => {

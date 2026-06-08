@@ -110,6 +110,7 @@ const INITIAL_SETTINGS: SystemSettings = {
   pointsMultiplier: 10000, // 1 point per 10,000 IDR
   pointsValue: 100, // 1 point = 100 IDR discount
   bluetoothPrinterAddress: 'CC:3F:1D:9B:D2:4E (Thermal POS-58)',
+  vercelTrackingUrl: 'https://laughdry.vercel.app',
   showNotesInReceipt: true,
   showPointsInReceipt: true,
   showBranchPhone: true,
@@ -242,6 +243,7 @@ export class LaughDryDatabase {
       if (attendance.length > 0) {
         this.saveKey('attendance', attendance);
       }
+      window.dispatchEvent(new CustomEvent('laughdry_db_synced'));
     } catch (e) {
       console.error("Gagal sinkronasi awal Firestore:", e);
     }
