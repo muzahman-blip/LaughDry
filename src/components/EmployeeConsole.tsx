@@ -1330,9 +1330,20 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
     const currentBranch = branches.find(b => b.id === order.branchId) || branches[0];
 
-    const systemSettings = LaughDryDatabase.getSettings();
-    const vercelBase = (systemSettings.vercelTrackingUrl || 'https://laughdry.vercel.app').replace(/\/$/, '');
-    const finalTrackingUrl = `${vercelBase}/?phone=${encodeURIComponent(order.customerPhone)}&invoice=${encodeURIComponent(order.invoiceNumber)}`;
+    const trackingDomain = (() => {
+      const envVal = (import.meta as any).env?.VITE_VERCEL_DOMAIN;
+      if (envVal && envVal !== "https://laughdry.vercel.app") {
+        return envVal.replace(/\/$/, "");
+      }
+      if (typeof window !== 'undefined' && window.location.origin) {
+        const origin = window.location.origin;
+        if (!origin.includes('localhost') && !origin.includes('127.0.0.1') && !origin.includes('capacitor')) {
+          return origin.replace(/\/$/, "");
+        }
+      }
+      return 'https://laughdry.vercel.app';
+    })();
+    const trackingUrl = `${trackingDomain}/?phone=${encodeURIComponent(order.customerPhone)}`;
 
     return defaultTemplate.body
       .replace(/\{\{customer_name\}\}/g, order.customerName)
@@ -1346,7 +1357,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       .replace(/\{\{branch_name\}\}/g, currentBranch.name)
       .replace(/\{\{branch_address\}\}/g, currentBranch.address)
       .replace(/\{\{payment_due\}\}/g, order.paymentStatus === 'Lunas' ? 'Lunas / Rp 0' : `Rp ${order.totalAmount.toLocaleString()}`)
-      .replace(/\{\{tracking_url\}\}/g, finalTrackingUrl);
+      .replace(/\{\{tracking_url\}\}/g, trackingUrl);
   };
 
   return (

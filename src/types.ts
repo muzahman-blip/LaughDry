@@ -179,7 +179,6 @@ export interface SystemSettings {
   qrisType?: 'none' | 'static' | 'dynamic';
   qrisMerchantId?: string;
   qrisStaticQrUrl?: string;
-  vercelTrackingUrl?: string;
 }
 
 export interface SettingsVersion {

@@ -33,8 +33,7 @@ import {
   Undo,
   Building,
   Phone,
-  Smartphone,
-  Globe
+  Smartphone
 } from 'lucide-react';
 import { LaughDryDatabase } from '../data/mockDatabase';
 import { Service, Expense, Branch, Order, OrderStatus, AuditLog, WhatsAppTemplate, Customer, SettingsVersion } from '../types';
@@ -2411,37 +2410,6 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                   id="points-value-input"
                 />
                 <p className="text-[10px] text-slate-400">Contoh: Pelanggan menukar 100 Poin untuk memotong Rp 10.000 tagihan.</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Integrasi Tracking & Vercel Domain Configuration */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 font-sans text-xs">
-            <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-              <Globe className="w-4 h-4 text-sky-500" />
-              Integrasi Web Tracking (Vercel & WhatsApp CRM)
-            </h4>
-            <p className="text-slate-505 text-[11px] leading-relaxed">
-              Atur domain web Vercel Anda agar tautan pelacakan status cucian instan (tanpa login nomor HP) dapat terdistribusi secara otomatis ke WhatsApp pelanggan saat pembuatan nota.
-            </p>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div className="space-y-1 md:col-span-2">
-                <label className="text-slate-600 block font-semibold">Domain Web Vercel (Tracking URL Base):</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-3 text-slate-400 font-mono text-xs select-none">URL:</span>
-                  <input
-                    type="text"
-                    value={settings.vercelTrackingUrl || ''}
-                    onChange={(e) => handleSettingsChange('vercelTrackingUrl', e.target.value)}
-                    placeholder="https://laughdry.vercel.app"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 pl-12 focus:bg-white focus:outline-none focus:border-sky-500 font-mono"
-                    id="vercel-tracking-url-input"
-                  />
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1 leading-normal">
-                  Sistem akan mengompilasi tautan lacak otomatis menggunakan format: <code className="font-mono bg-slate-100 text-slate-800 px-1 py-0.5 rounded text-[9.5px]">{(settings.vercelTrackingUrl || 'https://laughdry.vercel.app').replace(/\/$/, '')}/?phone=[Nomor HP]</code> yang langsung mengarah ke informasi pesanan & stamp card loyalitas pelanggan tanpa perlu melakukan login manual.
-                </p>
               </div>
             </div>
           </div>

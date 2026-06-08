@@ -24,7 +24,7 @@ import {
 import { LaughDryDatabase } from '../data/mockDatabase';
 import { Order, OrderStatus, Customer } from '../types';
 
-export default function CustomerTracking() {
+export default function CustomerTracking({ isInitialSyncCompleted = true }: { isInitialSyncCompleted?: boolean }) {
   const [phoneSearch, setPhoneSearch] = useState('');
   const [selectedInvoiceNumber, setSelectedInvoiceNumber] = useState('');
   const [customer, setCustomer] = useState<Customer | null>(null);
@@ -34,70 +34,31 @@ export default function CustomerTracking() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showStampCardModal, setShowStampCardModal] = useState(false);
 
-  // Ready for user search inputs / URL auto-login
+  // Ready for user search inputs & auto-login params
   useEffect(() => {
-    const performAutoLookup = () => {
-      const queryParams = new URLSearchParams(window.location.search);
-      const phoneParam = queryParams.get('phone');
-      const invoiceParam = queryParams.get('invoice');
-      
-      let targetPhone = phoneParam || '';
-      
-      if (!targetPhone && invoiceParam) {
-        const allOrders = LaughDryDatabase.getOrders();
-        const foundOrder = allOrders.find(o => o.invoiceNumber === invoiceParam);
-        if (foundOrder) {
-          targetPhone = foundOrder.customerPhone;
-        }
-      }
-      
-      if (targetPhone) {
-        setPhoneSearch(targetPhone);
-        
+    if (!isInitialSyncCompleted) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const phoneParam = params.get('phone');
+    const invoiceParam = params.get('invoice');
+    
+    if (phoneParam) {
+      setPhoneSearch(phoneParam);
+      lookupCustomerDataByPhone(phoneParam);
+    } else if (invoiceParam) {
+      // Find customer by invoice number and load customer's profile
+      const allOrders = LaughDryDatabase.getOrders();
+      const foundOrder = allOrders.find(o => o.invoiceNumber === invoiceParam || o.id === invoiceParam);
+      if (foundOrder) {
         const custs = LaughDryDatabase.getCustomers();
-        const found = custs.find(c => c.phone === targetPhone);
-        if (found) {
-          setCustomer(found);
-          const allOrders = LaughDryDatabase.getOrders();
-          const userOrders = allOrders.filter(o => o.customerId === found.id);
-          
-          const active = userOrders.filter(o => o.status !== OrderStatus.SELESAI && o.status !== OrderStatus.DIBATALKAN);
-          const history = userOrders.filter(o => o.status === OrderStatus.SELESAI || o.status === OrderStatus.DIBATALKAN);
-          
-          setActiveOrders(active);
-          setCompletedHistory(history);
-          setToastMessage(`👋 Halo ${found.name}! Informasi cucian Anda berhasil dimuat secara instan.`);
-          setTimeout(() => setToastMessage(null), 3000);
-          return true; // Successfully found and loaded
+        const foundCust = custs.find(c => c.id === foundOrder.customerId || c.phone === foundOrder.customerPhone);
+        if (foundCust) {
+          setPhoneSearch(foundCust.phone);
+          lookupCustomerDataByPhone(foundCust.phone);
         }
       }
-      return false;
-    };
-
-    // Try immediately
-    const success = performAutoLookup();
-    
-    // If database wasn't synced yet, listen to custom sync events to retry
-    const handleDbSynced = () => {
-      performAutoLookup();
-    };
-
-    window.addEventListener('laughdry_db_synced', handleDbSynced);
-    
-    // As a solid fallback, also try twice after short intervals
-    const timer1 = setTimeout(() => {
-      performAutoLookup();
-    }, 500);
-    const timer2 = setTimeout(() => {
-      performAutoLookup();
-    }, 1500);
-
-    return () => {
-      window.removeEventListener('laughdry_db_synced', handleDbSynced);
-      clearTimeout(timer1);
-      clearTimeout(timer2);
-    };
-  }, []);
+    }
+  }, [isInitialSyncCompleted]);
 
   const lookupCustomerDataByPhone = (phone: string) => {
     const custs = LaughDryDatabase.getCustomers();
@@ -467,7 +428,14 @@ export default function CustomerTracking() {
         </div>
       ) : (
         <div className="p-12 text-center text-xs text-slate-400 leading-relaxed bg-white border border-slate-200 rounded-3xl shadow-sm">
-          🔍 Menunggu inputan nomor ponsel Anda di atas untuk menampilkan stats & riwayat.
+          {!isInitialSyncCompleted ? (
+            <div className="flex flex-col items-center gap-3 py-6 justify-center">
+              <span className="w-8 h-8 rounded-full border-4 border-slate-200 border-t-sky-500 animate-spin"></span>
+              <span className="text-slate-500 font-medium">Menyelaraskan status cucian real-time dari cloud server...</span>
+            </div>
+          ) : (
+            "🔍 Menunggu inputan nomor ponsel Anda di atas untuk menampilkan stats & riwayat."
+          )}
         </div>
       )}
 
