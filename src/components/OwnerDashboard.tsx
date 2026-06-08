@@ -568,13 +568,21 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
   // Reset Simulator Data State
   const [showResetDbConfirm, setShowResetDbConfirm] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
-  const executeResetDatabase = () => {
-    LaughDryDatabase.resetToSeed();
-    loadDatabaseState();
-    LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'SYSTEM_RESET', 'Me-reset database ke kondisi awal (seed)');
-    setShowResetDbConfirm(false);
-    triggerToast("Database berhasil di-reset ke kondisi awal!");
+  const executeResetDatabase = async () => {
+    try {
+      setIsResetting(true);
+      await LaughDryDatabase.purgeAllDatabaseData();
+      await loadDatabaseState();
+      LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'SYSTEM_RESET', 'Mengosongkan sistem dan database live untuk persiapan rilis produksi gratis dari dummy data.');
+      setShowResetDbConfirm(false);
+      triggerToast("🧹 Database bersih diinisialisasi! Aplikasi siap diluncurkan.");
+    } catch (err) {
+      triggerToast("❌ Gagal membersihkan database live.");
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   // Backup file export simulator
@@ -4970,15 +4978,17 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             <div className="flex gap-2.5 mt-5">
               <button
                 onClick={() => setShowResetDbConfirm(false)}
-                className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition"
+                disabled={isResetting}
+                className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition disabled:opacity-50"
               >
                 Batal, Amankan DB
               </button>
               <button
                 onClick={executeResetDatabase}
-                className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs transition shadow-sm font-mono"
+                disabled={isResetting}
+                className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs transition shadow-sm font-mono disabled:opacity-50"
               >
-                Ya, Reset Total
+                {isResetting ? "⏳ Menyeka..." : "Ya, Kosongkan DB"}
               </button>
             </div>
           </div>

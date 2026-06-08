@@ -307,6 +307,18 @@ export class LaundryService {
   }
 
   /**
+   * Delete an attendance record from Firestore
+   */
+  static async deleteAttendanceRecord(attendanceId: string): Promise<void> {
+    const path = `attendance/${attendanceId}`;
+    try {
+      await deleteDoc(doc(db, 'attendance', attendanceId));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  }
+
+  /**
    * Generate complex reporting metrics directly from Firestore collections
    */
   static async fetchReports(): Promise<{

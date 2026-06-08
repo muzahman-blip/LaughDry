@@ -23,15 +23,11 @@ import { LaundryService } from '../services/laundryService';
 
 // Let's seed with rich initial data that demonstrates the platform's features instantly.
 const INITIAL_USERS: User[] = [
-  { id: 'usr-1', name: 'Andi Owner', role: 'owner', email: 'andi.owner@laughdry.co.id', username: 'owner', branchId: 'br-1', password: 'owner' },
-  { id: 'usr-2', name: 'Rian Karyawan', role: 'karyawan', email: 'rian@laughdry.co.id', username: 'rian', branchId: 'br-1', password: 'rian123' },
-  { id: 'usr-3', name: 'Siti Karyawan', role: 'karyawan', email: 'siti@laughdry.co.id', username: 'siti', branchId: 'br-2', password: 'siti123' },
+  { id: 'usr-1', name: 'Andi Owner', role: 'owner', email: 'owner@laughdry.co.id', username: 'owner', branchId: 'br-1', password: 'owner' }
 ];
 
 const INITIAL_BRANCHES: Branch[] = [
-  { id: 'br-1', name: 'Cabang Utama Bintaro', address: 'Jl. Boulevard Bintaro Sekse 7 No. 42, Tangerang Selatan', phone: '081234567890', latitude: -6.273, longitude: 106.726 },
-  { id: 'br-2', name: 'Cabang Premium Kemang', address: 'Jl. Kemang Raya No. 12B, Jakarta Selatan', phone: '082345678901', latitude: -6.274, longitude: 106.816 },
-  { id: 'br-3', name: 'Cabang Express Menteng', address: 'Jl. Teuku Umar No. 89, Jakarta Pusat', phone: '083456789012', latitude: -6.188, longitude: 106.837 },
+  { id: 'br-1', name: 'Cabang Utama', address: 'Jl. Utama Laundry No. 1', phone: '081234567890', latitude: -6.273, longitude: 106.726 }
 ];
 
 const INITIAL_SERVICES: Service[] = [
@@ -571,5 +567,72 @@ export class LaughDryDatabase {
     localStorage.removeItem('laughdry_templates');
     localStorage.removeItem('laughdry_settings');
     localStorage.removeItem('laughdry_attendance');
+  }
+
+  public static async purgeAllDatabaseData(): Promise<void> {
+    try {
+      // 1. Fetch and delete all orders
+      const orders = await LaundryService.getOrders();
+      for (const o of orders) {
+        try { await LaundryService.deleteOrder(o.id); } catch (e) {}
+      }
+      
+      // 2. Fetch and delete all customers
+      const customers = await LaundryService.getCustomers();
+      for (const c of customers) {
+        try { await LaundryService.deleteCustomer(c.id); } catch (e) {}
+      }
+      
+      // 3. Fetch and delete all expenses
+      const expenses = await LaundryService.getExpenses();
+      for (const e of expenses) {
+        try { await LaundryService.deleteExpense(e.id); } catch (err) {}
+      }
+      
+      // 4. Fetch and delete all attendance records
+      const attendance = await LaundryService.getAttendanceRecords();
+      for (const a of attendance) {
+        try { await LaundryService.deleteAttendanceRecord(a.id); } catch (err) {}
+      }
+      
+      // 5. Delete non-primary branches
+      const branches = await LaundryService.getBranches();
+      for (const b of branches) {
+        if (b.id !== 'br-1') {
+          try { await LaundryService.deleteBranch(b.id); } catch (e) {}
+        }
+      }
+      
+      // 6. Delete custom services
+      const services = await LaundryService.getServices();
+      const standardServiceIds = ['srv-1', 'srv-2', 'srv-5', 'srv-6', 'srv-8'];
+      for (const s of services) {
+        if (!standardServiceIds.includes(s.id)) {
+          try { await LaundryService.deleteService(s.id); } catch (e) {}
+        }
+      }
+
+      // 7. Clear all local storage
+      this.resetToSeed();
+      
+      // 8. Save clean defaults
+      this.saveKey('users', INITIAL_USERS);
+      this.saveKey('branches', INITIAL_BRANCHES);
+      this.saveKey('services', INITIAL_SERVICES);
+      this.saveKey('customers', []);
+      this.saveKey('orders', []);
+      this.saveKey('expenses', []);
+      this.saveKey('deposits', []);
+      this.saveKey('loyalty', []);
+      this.saveKey('attendance', []);
+      this.saveKey('audit_logs', []);
+      
+      await LaundryService.saveSettings(INITIAL_SETTINGS);
+      this.saveKey('settings', INITIAL_SETTINGS);
+
+    } catch (err) {
+      console.error("Gagal melakukan pembersihan database:", err);
+      throw err;
+    }
   }
 }
