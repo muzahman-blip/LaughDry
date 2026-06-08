@@ -36,6 +36,7 @@ export default function App() {
   });
   const [currentTime, setCurrentTime] = useState<string>('');
   const [isSyncing, setIsSyncing] = useState<boolean>(true);
+  const [pendingSyncCount, setPendingSyncCount] = useState<number>(0);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('laughdry_theme') as 'light' | 'dark') || 'light';
   });
@@ -47,6 +48,41 @@ export default function App() {
       setIsSyncing(false);
     }
     syncData();
+  }, []);
+
+  // Sync background offline-first transactions & subscribe to changes
+  useEffect(() => {
+    const updateCount = () => {
+      setPendingSyncCount(LaughDryDatabase.getPendingSyncs().length);
+    };
+
+    updateCount();
+
+    // Event listener for online status to flush pending syncs automatically
+    const handleOnline = async () => {
+      console.log("Device is online, triggering pending offline sync...");
+      await LaughDryDatabase.processPendingSyncs();
+      updateCount();
+    };
+
+    window.addEventListener('laughdry_sync_queue_updated', updateCount);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', updateCount);
+
+    // Periodically run pending queues check every 12 seconds
+    const interval = setInterval(async () => {
+      if (navigator.onLine) {
+        await LaughDryDatabase.processPendingSyncs();
+        updateCount();
+      }
+    }, 12000);
+
+    return () => {
+      window.removeEventListener('laughdry_sync_queue_updated', updateCount);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', updateCount);
+      clearInterval(interval);
+    };
   }, []);
 
   useEffect(() => {
@@ -166,8 +202,27 @@ export default function App() {
 
           {/* Real-time system log details */}
           <div className="flex items-center gap-5 text-xs text-slate-400">
+            {pendingSyncCount > 0 && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const count = await LaughDryDatabase.processPendingSyncs();
+                  setPendingSyncCount(LaughDryDatabase.getPendingSyncs().length);
+                  if (count > 0) {
+                    alert(`✅ Berhasil mensinkronkan ${count} transaksi tertunda ke Firestore!`);
+                  } else {
+                    alert(`ℹ️ Belum bisa melakukan sinkronisasi otomatis. Periksa koneksi internet Anda.`);
+                  }
+                }}
+                className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded-xl text-amber-400 font-bold text-[10.5px] cursor-pointer animate-pulse hover:bg-amber-500/20 transition-all select-none"
+                title="Menunggu jaringan online. Klik untuk coba sinkronkan sekarang manual."
+              >
+                <span>⚡ {pendingSyncCount} Tertunda Synchronize</span>
+              </button>
+            )}
+
             <div className="hidden lg:flex items-center gap-1.5 font-mono">
-              <span className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-amber-400 animate-pulse' : 'bg-green-400 animate-ping'}`}></span>
+              <span className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-amber-400 animate-pulse' : 'bg-green-400'}`}></span>
               <span className="text-[11px] font-bold uppercase text-slate-200">
                 {isSyncing ? 'Firestore: Menyelaraskan...' : 'Firestore: Aktif & Sinkron'}
               </span>

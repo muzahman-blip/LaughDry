@@ -1,7 +1,10 @@
 {
   "name": "LaughDry Laundry",
   "description": "Sistem Manajemen Laundry Terintegrasi dengan fitur POS Modern, CRM, Mini ERP, dan Business Intelligence untuk Laundry Kita.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]

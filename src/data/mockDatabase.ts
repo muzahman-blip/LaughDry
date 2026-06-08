@@ -29,9 +29,9 @@ const INITIAL_USERS: User[] = [
 ];
 
 const INITIAL_BRANCHES: Branch[] = [
-  { id: 'br-1', name: 'Cabang Utama Bintaro', address: 'Jl. Boulevard Bintaro Sekse 7 No. 42, Tangerang Selatan', phone: '081234567890' },
-  { id: 'br-2', name: 'Cabang Premium Kemang', address: 'Jl. Kemang Raya No. 12B, Jakarta Selatan', phone: '082345678901' },
-  { id: 'br-3', name: 'Cabang Express Menteng', address: 'Jl. Teuku Umar No. 89, Jakarta Pusat', phone: '083456789012' },
+  { id: 'br-1', name: 'Cabang Utama Bintaro', address: 'Jl. Boulevard Bintaro Sekse 7 No. 42, Tangerang Selatan', phone: '081234567890', latitude: -6.273, longitude: 106.726 },
+  { id: 'br-2', name: 'Cabang Premium Kemang', address: 'Jl. Kemang Raya No. 12B, Jakarta Selatan', phone: '082345678901', latitude: -6.274, longitude: 106.816 },
+  { id: 'br-3', name: 'Cabang Express Menteng', address: 'Jl. Teuku Umar No. 89, Jakarta Pusat', phone: '083456789012', latitude: -6.188, longitude: 106.837 },
 ];
 
 const INITIAL_SERVICES: Service[] = [
@@ -255,22 +255,120 @@ export class LaughDryDatabase {
   public static getUsers(): User[] { return this.loadKey('users', INITIAL_USERS); }
   public static saveUsers(data: User[]) { this.saveKey('users', data); }
 
+  // Save helper that tries to execute Firestore write, or queues it if offline or failed
+  public static async queueSync(
+    type: 'order' | 'customer' | 'expense' | 'attendance' | 'branch' | 'service' | 'settings',
+    action: 'save' | 'delete',
+    payloadId: string,
+    payload: any
+  ): Promise<void> {
+    try {
+      if (navigator.onLine) {
+        await this.executeSync(type, action, payloadId, payload);
+        return; // Synchronized successfully
+      }
+    } catch (err) {
+      console.warn(`Direct write failed for ${type} ${payloadId}, queuing for offline sync...`, err);
+    }
+    
+    const pending = this.getPendingSyncs();
+    const filtered = pending.filter(item => !(item.type === type && item.payloadId === payloadId && item.action === action));
+    
+    const newItem = {
+      id: `sync-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      type,
+      action,
+      payloadId,
+      payload,
+      timestamp: Date.now()
+    };
+    
+    this.saveKey('pending_syncs', [...filtered, newItem]);
+    
+    // Fire off custom event for notification or ui update
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('laughdry_sync_queue_updated'));
+    }
+  }
+
+  private static async executeSync(
+    type: string,
+    action: 'save' | 'delete',
+    payloadId: string,
+    payload: any
+  ): Promise<void> {
+    if (action === 'delete') {
+      if (type === 'order') await LaundryService.deleteOrder(payloadId);
+      else if (type === 'customer') await LaundryService.deleteCustomer(payloadId);
+      else if (type === 'expense') await LaundryService.deleteExpense(payloadId);
+      else if (type === 'branch') await LaundryService.deleteBranch(payloadId);
+      else if (type === 'service') await LaundryService.deleteService(payloadId);
+    } else {
+      if (type === 'order') await LaundryService.addOrder(payload);
+      else if (type === 'customer') await LaundryService.saveCustomer(payload);
+      else if (type === 'expense') await LaundryService.saveExpense(payload);
+      else if (type === 'branch') await LaundryService.saveBranch(payload);
+      else if (type === 'service') await LaundryService.saveService(payload);
+      else if (type === 'attendance') await LaundryService.saveAttendanceRecord(payload);
+      else if (type === 'settings') await LaundryService.saveSettings(payload);
+    }
+  }
+
+  private static isSyncingPending = false;
+
+  public static async processPendingSyncs(): Promise<number> {
+    if (this.isSyncingPending) return 0;
+    const pending = this.getPendingSyncs();
+    if (pending.length === 0) return 0;
+    
+    if (!navigator.onLine) {
+      return 0;
+    }
+    
+    this.isSyncingPending = true;
+    const remaining: any[] = [];
+    let successCount = 0;
+    
+    for (const item of pending) {
+      try {
+        await this.executeSync(item.type, item.action, item.payloadId, item.payload);
+        successCount++;
+      } catch (err) {
+        console.error(`Failed to sync pending ${item.type} (${item.payloadId})`, err);
+        remaining.push(item);
+      }
+    }
+    
+    this.saveKey('pending_syncs', remaining);
+    this.isSyncingPending = false;
+    
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('laughdry_sync_queue_updated'));
+    }
+    
+    return successCount;
+  }
+  
+  public static getPendingSyncs(): any[] {
+    return this.loadKey('pending_syncs', []);
+  }
+
   public static getBranches(): Branch[] { return this.loadKey('branches', INITIAL_BRANCHES); }
   public static saveBranches(data: Branch[]) { 
     const previous = this.getBranches();
     this.saveKey('branches', data); 
     
-    // Differential Sync
+    // Differential Sync using QueueSync for network recovery
     data.forEach(item => {
       const prevItem = previous.find(p => p.id === item.id);
       if (!prevItem || JSON.stringify(prevItem) !== JSON.stringify(item)) {
-        LaundryService.saveBranch(item).catch(err => console.error("Gagal save branch ke Firestore:", err));
+        this.queueSync('branch', 'save', item.id, item);
       }
     });
     previous.forEach(prevItem => {
       const exists = data.some(d => d.id === prevItem.id);
       if (!exists) {
-        LaundryService.deleteBranch(prevItem.id).catch(err => console.error("Gagal delete branch dari Firestore:", err));
+        this.queueSync('branch', 'delete', prevItem.id, null);
       }
     });
   }
@@ -280,17 +378,17 @@ export class LaughDryDatabase {
     const previous = this.getServices();
     this.saveKey('services', data); 
     
-    // Differential Sync
+    // Differential Sync using QueueSync for network recovery
     data.forEach(item => {
       const prevItem = previous.find(p => p.id === item.id);
       if (!prevItem || JSON.stringify(prevItem) !== JSON.stringify(item)) {
-        LaundryService.saveService(item).catch(err => console.error("Gagal save service ke Firestore:", err));
+        this.queueSync('service', 'save', item.id, item);
       }
     });
     previous.forEach(prevItem => {
       const exists = data.some(d => d.id === prevItem.id);
       if (!exists) {
-        LaundryService.deleteService(prevItem.id).catch(err => console.error("Gagal delete service dari Firestore:", err));
+        this.queueSync('service', 'delete', prevItem.id, null);
       }
     });
   }
@@ -300,17 +398,17 @@ export class LaughDryDatabase {
     const previous = this.getCustomers();
     this.saveKey('customers', data); 
     
-    // Differential Sync
+    // Differential Sync using QueueSync for network recovery
     data.forEach(item => {
       const prevItem = previous.find(p => p.id === item.id);
       if (!prevItem || JSON.stringify(prevItem) !== JSON.stringify(item)) {
-        LaundryService.saveCustomer(item).catch(err => console.error("Gagal save customer ke Firestore:", err));
+        this.queueSync('customer', 'save', item.id, item);
       }
     });
     previous.forEach(prevItem => {
       const exists = data.some(d => d.id === prevItem.id);
       if (!exists) {
-        LaundryService.deleteCustomer(prevItem.id).catch(err => console.error("Gagal delete customer dari Firestore:", err));
+        this.queueSync('customer', 'delete', prevItem.id, null);
       }
     });
   }
@@ -320,17 +418,17 @@ export class LaughDryDatabase {
     const previous = this.getOrders();
     this.saveKey('orders', data); 
     
-    // Differential Sync
+    // Differential Sync using QueueSync for network recovery
     data.forEach(item => {
       const prevItem = previous.find(p => p.id === item.id);
       if (!prevItem || JSON.stringify(prevItem) !== JSON.stringify(item)) {
-        LaundryService.addOrder(item).catch(err => console.error("Gagal save order ke Firestore:", err));
+        this.queueSync('order', 'save', item.id, item);
       }
     });
     previous.forEach(prevItem => {
       const exists = data.some(d => d.id === prevItem.id);
       if (!exists) {
-        LaundryService.deleteOrder(prevItem.id).catch(err => console.error("Gagal delete order dari Firestore:", err));
+        this.queueSync('order', 'delete', prevItem.id, null);
       }
     });
   }
@@ -340,17 +438,17 @@ export class LaughDryDatabase {
     const previous = this.getExpenses();
     this.saveKey('expenses', data); 
     
-    // Differential Sync
+    // Differential Sync using QueueSync for network recovery
     data.forEach(item => {
       const prevItem = previous.find(p => p.id === item.id);
       if (!prevItem || JSON.stringify(prevItem) !== JSON.stringify(item)) {
-        LaundryService.saveExpense(item).catch(err => console.error("Gagal save expense ke Firestore:", err));
+        this.queueSync('expense', 'save', item.id, item);
       }
     });
     previous.forEach(prevItem => {
       const exists = data.some(d => d.id === prevItem.id);
       if (!exists) {
-        LaundryService.deleteExpense(prevItem.id).catch(err => console.error("Gagal delete expense dari Firestore:", err));
+        this.queueSync('expense', 'delete', prevItem.id, null);
       }
     });
   }
@@ -372,11 +470,11 @@ export class LaughDryDatabase {
     const previous = this.getAttendance();
     this.saveKey('attendance', data); 
     
-    // Differential Sync
+    // Differential Sync using QueueSync for network recovery
     data.forEach(item => {
       const prevItem = previous.find(p => p.id === item.id);
       if (!prevItem || JSON.stringify(prevItem) !== JSON.stringify(item)) {
-        LaundryService.saveAttendanceRecord(item).catch(err => console.error("Gagal save attendance ke Firestore:", err));
+        this.queueSync('attendance', 'save', item.id, item);
       }
     });
   }
@@ -392,7 +490,7 @@ export class LaughDryDatabase {
   }
   public static saveSettings(data: SystemSettings) { 
     this.saveKey('settings', data); 
-    LaundryService.saveSettings(data).catch(err => console.error(err));
+    this.queueSync('settings', 'save', 'system', data);
   }
 
   public static getSettingsHistory(): SettingsVersion[] {

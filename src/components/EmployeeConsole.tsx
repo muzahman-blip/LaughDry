@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   UserCheck,
   Search,
@@ -18,6 +18,8 @@ import {
   CheckCircle,
   Clock,
   QrCode,
+  MapPin,
+  Camera,
   DollarSign,
   ArrowRight,
   Info,
@@ -27,7 +29,8 @@ import {
   Phone,
   Bluetooth,
   Gift,
-  Award
+  Award,
+  Shirt
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LaughDryDatabase } from '../data/mockDatabase';
@@ -73,6 +76,12 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   // Interactive Payment Choice Popup (Cash, Transfer, Deposit)
   const [showPaymentChoiceModal, setShowPaymentChoiceModal] = useState(false);
 
+  // Pop-up input untuk jumlah pakaian saat transisi ke proses Cuci (Dicuci)
+  const [washTransitionOrderId, setWashTransitionOrderId] = useState<string | null>(null);
+  const [washTransitionCurrentStatus, setWashTransitionCurrentStatus] = useState<OrderStatus | null>(null);
+  const [showWashInputModal, setShowWashInputModal] = useState(false);
+  const [washClothesCountInput, setWashClothesCountInput] = useState<string>('');
+
   // Post-submit Choice Popup (print / send WA)
   const [showInvoiceChoiceModal, setShowInvoiceChoiceModal] = useState(false);
   const [showThermalReceiptModal, setShowThermalReceiptModal] = useState(false);
@@ -101,6 +110,22 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   // Modals / Dialog states
   const [activeInvoice, setActiveInvoice] = useState<Order | null>(null);
   const [showOrderDetailModal, setShowOrderDetailModal] = useState<Order | null>(null);
+
+  // --- STATE-STATE ENHANCEMENT ATTENDANCE (CAMERA & RECONCILIATION) ---
+  const [showAttendanceModal, setShowAttendanceModal] = useState<boolean>(false);
+  const [attendanceMode, setAttendanceMode] = useState<'checkin' | 'checkout'>('checkin');
+  const [capturedPhotoUrl, setCapturedPhotoUrl] = useState<string | null>(null);
+  const [capturedCoordinates, setCapturedCoordinates] = useState<{ lat: number; lng: number } | null>(null);
+  const [gpsDistance, setGpsDistance] = useState<number | null>(null);
+  const [gpsStatusText, setGpsStatusText] = useState<string>('Mendeteksi GPS...');
+  const [startingCashBalanceInput, setStartingCashBalanceInput] = useState<string>('200000');
+  const [endingCashDrawerInputVal, setEndingCashDrawerInputVal] = useState<string>('');
+  const [expectedCashDrawerValue, setExpectedCashDrawerValue] = useState<number>(0);
+  const [reconciliationVariance, setReconciliationVariance] = useState<number>(0);
+  const [reconciliationNotesVal, setReconciliationNotesVal] = useState<string>('');
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const [showStampCardModal, setShowStampCardModal] = useState(false);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showBluetoothPrint, setShowBluetoothPrint] = useState(false);
@@ -229,6 +254,196 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [attendanceNotes, setAttendanceNotes] = useState('');
 
+  // Haversine formula to compute distance in meters between two geolocations
+  const getDistanceFromLatLonInMeters = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371000; // Earth's radius in meters
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const d = R * c; // Distance in meters
+    return d;
+  };
+
+  const calculateExpectedCashBalanceForShift = () => {
+    const records = LaughDryDatabase.getAttendance();
+    const active = records.find(r => r.userId === currentUser.id && r.status === 'Hadir');
+    if (!active) {
+      setExpectedCashDrawerValue(0);
+      setReconciliationVariance(0);
+      return;
+    }
+    
+    const checkInTime = new Date(active.checkIn);
+    const startingCash = active.startingCashDrawer || 0;
+    
+    // Fetch Cash orders made by this cashier since checkIn
+    const filteredOrders = orders.filter(o => 
+      o.branchId === currentUser.branchId &&
+      o.createdAt &&
+      new Date(o.createdAt) >= checkInTime &&
+      o.paymentMethod === 'Cash' &&
+      o.paymentStatus === 'Lunas'
+    );
+    const totalCashRevenue = filteredOrders.reduce((sum, order) => sum + order.totalAmount, 0);
+    
+    // Subtract all expenses recorded by this cashier in this branch since checkIn
+    const filteredExpenses = expenses.filter(e => 
+      e.branchId === currentUser.branchId &&
+      e.date &&
+      new Date(e.date) >= checkInTime
+    );
+    const totalCashExpenses = filteredExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+    
+    const expectedValue = startingCash + totalCashRevenue - totalCashExpenses;
+    setExpectedCashDrawerValue(expectedValue);
+    
+    // Recalculate variance with current ending cash input
+    const endingCash = parseFloat(endingCashDrawerInputVal) || 0;
+    setReconciliationVariance(endingCash - expectedValue);
+  };
+
+  const startCameraStream = async () => {
+    try {
+      setCameraPermissionGranted(null);
+      const constraints = {
+        video: { facingMode: 'user', width: 400, height: 300 }
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      setCameraStream(stream);
+      setCameraPermissionGranted(true);
+      
+      // Assign stream to video tag
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      }, 300);
+    } catch (err) {
+      console.warn("Kamera tidak dapat diakses (Melanjutkan lewat simulasi selfie default):", err);
+      setCameraPermissionGranted(false);
+    }
+  };
+
+  const stopCameraStream = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+  };
+
+  const captureSelfieSnapshot = () => {
+    if (videoRef.current && cameraStream) {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 400;
+        canvas.height = 300;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(videoRef.current, 0, 0, 400, 300);
+          const dataUrl = canvas.toDataURL('image/jpeg');
+          setCapturedPhotoUrl(dataUrl);
+          stopCameraStream();
+          showToast("📸 Foto selfie wajah berhasil terekam!");
+        }
+      } catch (err) {
+        console.error("Gagal capture via canvas, fallback ke simulasi:", err);
+        triggerMockSelfie();
+      }
+    } else {
+      triggerMockSelfie();
+    }
+  };
+
+  const triggerMockSelfie = () => {
+    const mockPhotos = [
+      "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=200", 
+      "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200", 
+      "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&q=80&w=200"
+    ];
+    const idx = currentUser.name.charCodeAt(0) % mockPhotos.length;
+    setCapturedPhotoUrl(mockPhotos[idx]);
+    stopCameraStream();
+    showToast("📸 Selfie Presensi berhasil disimulasikan!");
+  };
+
+  const initiateAttendanceFlow = (mode: 'checkin' | 'checkout') => {
+    setAttendanceMode(mode);
+    setCapturedPhotoUrl(null);
+    setCapturedCoordinates(null);
+    setGpsDistance(null);
+    setGpsStatusText('Mengambil koordinat GPS Anda...');
+    
+    if (mode === 'checkout') {
+      setEndingCashDrawerInputVal('');
+      setReconciliationNotesVal('');
+      // We will calculate Expected Cash live in a hook or right away
+      setTimeout(() => calculateExpectedCashBalanceForShift(), 100);
+    } else {
+      setStartingCashBalanceInput('200000');
+    }
+    
+    setShowAttendanceModal(true);
+    
+    // GPS Geolocation Query
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          setCapturedCoordinates({ lat, lng });
+          
+          const curBranches = LaughDryDatabase.getBranches();
+          const branchObj = curBranches.find(b => b.id === currentUser.branchId);
+          if (branchObj && branchObj.latitude && branchObj.longitude) {
+            const distance = getDistanceFromLatLonInMeters(
+              lat, 
+              lng, 
+              branchObj.latitude, 
+              branchObj.longitude
+            );
+            setGpsDistance(distance);
+            if (distance <= 150) {
+              setGpsStatusText(`✅ GPS Terverifikasi: Di dalam radius cabang (${Math.round(distance)}m dari outlet)`);
+            } else {
+              setGpsStatusText(`⚠️ Perhatian: Anda berada di luar radius cabang (${Math.round(distance)}m). Diperlukan konfirmasi.`);
+            }
+          } else {
+            setGpsStatusText(`ℹ️ Lokasi GPS Anda: ${lat.toFixed(6)}, ${lng.toFixed(6)} (Cabang belum mengaktifkan geofencing koordinat)`);
+          }
+        },
+        (error) => {
+          console.warn("Gagal deteksi GPS, fallback ke simulasi:", error);
+          const curBranches = LaughDryDatabase.getBranches();
+          const branchObj = curBranches.find(b => b.id === currentUser.branchId);
+          if (branchObj && branchObj.latitude && branchObj.longitude) {
+            setCapturedCoordinates({ lat: branchObj.latitude, lng: branchObj.longitude });
+            setGpsDistance(0);
+            setGpsStatusText(`✅ GPS Disimulasikan: ${branchObj.latitude.toFixed(6)}, ${branchObj.longitude.toFixed(6)} (Auto-cocok Cabang)`);
+          } else {
+            setCapturedCoordinates({ lat: -6.273, lng: 106.726 });
+            setGpsStatusText(`ℹ️ GPS Disimulasikan (Mock): -6.27300, 106.72600`);
+          }
+        },
+        { enableHighAccuracy: true, timeout: 6000 }
+      );
+    } else {
+      setGpsStatusText("❌ Geolocation dilarang peramban. Menggunakan koordinat cabang.");
+      const curBranches = LaughDryDatabase.getBranches();
+      const branchObj = curBranches.find(b => b.id === currentUser.branchId);
+      if (branchObj && branchObj.latitude && branchObj.longitude) {
+        setCapturedCoordinates({ lat: branchObj.latitude, lng: branchObj.longitude });
+      } else {
+        setCapturedCoordinates({ lat: -6.273, lng: 106.726 });
+      }
+    }
+    
+    startCameraStream();
+  };
+
   const handleCheckIn = () => {
     const records = LaughDryDatabase.getAttendance();
     const active = records.find(r => r.userId === currentUser.id && r.status === 'Hadir');
@@ -236,24 +451,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       showToast("⚠️ Anda terdeteksi sudah Check-In! Silakan Check-Out terlebih dahulu.");
       return;
     }
-
-    const newRecord: AttendanceRecord = {
-      id: `att-${Date.now()}`,
-      userId: currentUser.id,
-      userName: currentUser.name,
-      branchId: currentUser.branchId || 'br-1',
-      checkIn: new Date().toISOString(),
-      status: 'Hadir',
-      notes: attendanceNotes || 'Hadir harian kasir',
-      latLong: '-6.255, 106.715'
-    };
-
-    const updated = [newRecord, ...records];
-    LaughDryDatabase.saveAttendance(updated);
-    setAttendanceRecords(updated);
-    setAttendanceNotes('');
-    showToast("🟢 Check-In Harian Berhasil Tercatat!");
-    LaughDryDatabase.logActivity(currentUser.id, currentUser.name, currentUser.role, 'Check-In', `Kasir melakukan check-in di cabang ${currentUser.branchId || 'br-1'}`);
+    initiateAttendanceFlow('checkin');
   };
 
   const handleCheckOut = () => {
@@ -263,27 +461,99 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       showToast("⚠️ Tidak menemukan riwayat Check-In aktif Anda!");
       return;
     }
+    initiateAttendanceFlow('checkout');
+  };
 
-    const activeRecord = records[activeIndex];
-    const checkOutTime = new Date();
-    const durationMinutes = Math.round((checkOutTime.getTime() - new Date(activeRecord.checkIn).getTime()) / 60000);
+  const executeSubmitAttendance = () => {
+    if (!capturedPhotoUrl) {
+      showToast("⚠️ Silakan ambil foto selfie wajah terlebih dahulu!");
+      return;
+    }
 
-    const updatedRecord: AttendanceRecord = {
-      ...activeRecord,
-      checkOut: checkOutTime.toISOString(),
-      workDuration: durationMinutes,
-      status: 'Selesai',
-      notes: attendanceNotes ? `${activeRecord.notes} | Checkout notes: ${attendanceNotes}` : activeRecord.notes
-    };
-
-    const updated = [...records];
-    updated[activeIndex] = updatedRecord;
+    if (attendanceMode === 'checkin') {
+      const startCash = parseFloat(startingCashBalanceInput);
+      if (isNaN(startCash) || startCash < 0) {
+        showToast("⚠️ Saldo awal kas kasir harus berupa angka positif!");
+        return;
+      }
+      
+      const records = LaughDryDatabase.getAttendance();
+      const newRecord: AttendanceRecord = {
+        id: `att-${Date.now()}`,
+        userId: currentUser.id,
+        userName: currentUser.name,
+        branchId: currentUser.branchId || 'br-1',
+        checkIn: new Date().toISOString(),
+        status: 'Hadir',
+        notes: attendanceNotes || 'Check-in Shift Kerja Baru',
+        latLong: capturedCoordinates ? `${capturedCoordinates.lat.toFixed(6)}, ${capturedCoordinates.lng.toFixed(6)}` : '-6.255, 106.715',
+        photoUrl: capturedPhotoUrl,
+        startingCashDrawer: startCash
+      };
+      
+      const updated = [newRecord, ...records];
+      LaughDryDatabase.saveAttendance(updated);
+      setAttendanceRecords(updated);
+      setAttendanceNotes('');
+      setShowAttendanceModal(false);
+      showToast("🟢 Check-In Harian dengan Selfie & GPS Berhasil!");
+      LaughDryDatabase.logActivity(currentUser.id, currentUser.name, currentUser.role, 'Check-In', `Kasir melakukan check-in selfie di cabang ${currentUser.branchId || 'br-1'} dengan kas drawer awal: Rp ${startCash.toLocaleString('id-ID')}`);
+    } else {
+      const endCash = parseFloat(endingCashDrawerInputVal);
+      if (isNaN(endCash) || endCash < 0) {
+        showToast("⚠️ Nominal fisik uang tunai di laci harus berupa angka positif!");
+        return;
+      }
+      
+      const records = LaughDryDatabase.getAttendance();
+      const activeIdx = records.findIndex(r => r.userId === currentUser.id && r.status === 'Hadir');
+      if (activeIdx === -1) {
+        showToast("⚠️ Tidak menemukan riwayat Check-In aktif Anda!");
+        return;
+      }
+      
+      const activeRecord = records[activeIdx];
+      const checkOutTime = new Date();
+      const durationMinutes = Math.round((checkOutTime.getTime() - new Date(activeRecord.checkIn).getTime()) / 60000);
+      const variance = endCash - expectedCashDrawerValue;
+      
+      if (variance !== 0 && !reconciliationNotesVal.trim()) {
+        showToast("⚠️ Terdeteksi selisih keuangan kasir! Silakan tulis alasan/keterangan selisih pada kolom catatan.");
+        return;
+      }
+      
+      const updatedRecord: AttendanceRecord = {
+        ...activeRecord,
+        checkOut: checkOutTime.toISOString(),
+        workDuration: durationMinutes,
+        status: 'Selesai',
+        photoUrl: capturedPhotoUrl,
+        endingCashDrawerInput: endCash,
+        expectedCashBalance: expectedCashDrawerValue,
+        cashDifference: variance,
+        reconciliationNotes: reconciliationNotesVal,
+        notes: attendanceNotes ? `${activeRecord.notes} | Checkout notes: ${attendanceNotes}` : activeRecord.notes
+      };
+      
+      const updated = [...records];
+      updated[activeIdx] = updatedRecord;
+      
+      LaughDryDatabase.saveAttendance(updated);
+      setAttendanceRecords(updated);
+      setAttendanceNotes('');
+      setShowAttendanceModal(false);
+      
+      if (variance === 0) {
+        alert(`🔴 CHECK-OUT SHIFT SUKSES!\n\n📋 Hasil Cash Reconciliation:\n👍 Keuangan COCOK (0 Selisih)!\n• Cash Drawer Fisik: Rp ${endCash.toLocaleString('id-ID')}\n• Cash Buku Sistem: Rp ${expectedCashDrawerValue.toLocaleString('id-ID')}\n• Durasi Kerja Shift: ${durationMinutes} menit.\n\nSelamat beristirahat!`);
+      } else {
+        const type = variance > 0 ? "SURPLUS" : "DEFISIT / KURANG";
+        alert(`⚠️ ATTENTION: CHECK-OUT SELESAI DENGAN SELISIH KEUANGAN!\n\n📋 Hasil Cash Reconciliation:\n• Status: Terjadi SELISIH (${type})!\n• Nominal Selisih: Rp ${variance.toLocaleString('id-ID')}\n• Cash Drawer Fisik: Rp ${endCash.toLocaleString('id-ID')}\n• Cash Buku Sistem: Rp ${expectedCashDrawerValue.toLocaleString('id-ID')}\n• Catatan Kasir: ${reconciliationNotesVal}\n\nLaporan rekonsiliasi kas terekam permanen dan telah di-submit ke Owner.`);
+      }
+      
+      LaughDryDatabase.logActivity(currentUser.id, currentUser.name, currentUser.role, 'Check-Out', `Kasir check-out selfie. Rekonsiliasi Kas: Fisik=Rp ${endCash}, Sistem=Rp ${expectedCashDrawerValue}, Selisih=Rp ${variance}`);
+    }
     
-    LaughDryDatabase.saveAttendance(updated);
-    setAttendanceRecords(updated);
-    setAttendanceNotes('');
-    showToast(`🔴 Check-Out Sukses! Durasi kerja: ${durationMinutes} menit.`);
-    LaughDryDatabase.logActivity(currentUser.id, currentUser.name, currentUser.role, 'Check-Out', `Kasir check-out. Total kerja ${durationMinutes} menit.`);
+    stopCameraStream();
   };
   
   // Discount states
@@ -791,6 +1061,8 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     }
 
     const curIdx = statuses.indexOf(currentStatus);
+    let nextStatus: OrderStatus | null = null;
+    
     if (curIdx === -1 || curIdx === statuses.length - 1) {
       // Fallback: If not found in custom steps, try standard statuses
       const fallbackStatuses = [
@@ -802,25 +1074,72 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
         OrderStatus.SELESAI
       ];
       const fbIdx = fallbackStatuses.indexOf(currentStatus);
-      if (fbIdx === -1 || fbIdx === fallbackStatuses.length - 1) return;
-      
-      const nextStatus = fallbackStatuses[fbIdx + 1];
-      if (nextStatus === OrderStatus.SELESAI) {
-        setPaymentTransitionOrderId(orderId);
-        setShowPaymentPopUp(true);
-        return;
+      if (fbIdx !== -1 && fbIdx < fallbackStatuses.length - 1) {
+        nextStatus = fallbackStatuses[fbIdx + 1];
       }
-      updateOrderStatus(orderId, nextStatus, currentStatus);
+    } else {
+      nextStatus = statuses[curIdx + 1];
+    }
+
+    if (!nextStatus) return;
+
+    // INTERCEPT transition to Dicuci (proses cuci) to prompt for clothes count!
+    if (nextStatus === OrderStatus.DICUCI) {
+      setWashTransitionOrderId(orderId);
+      setWashTransitionCurrentStatus(currentStatus);
+      setWashClothesCountInput(orderObj?.clothesCount?.toString() || '');
+      setShowWashInputModal(true);
       return;
     }
 
-    const nextStatus = statuses[curIdx + 1];
     if (nextStatus === OrderStatus.SELESAI) {
       setPaymentTransitionOrderId(orderId);
       setShowPaymentPopUp(true);
       return;
     }
+    
     updateOrderStatus(orderId, nextStatus, currentStatus);
+  };
+
+  const submitWashTransitionWithClothes = (e: React.FormEvent) => {
+    e.preventDefault();
+    const count = parseInt(washClothesCountInput, 10);
+    if (isNaN(count) || count <= 0) {
+      showToast("⚠️ Jumlah pakaian harus berupa angka dan lebih dari 0!");
+      return;
+    }
+
+    if (!washTransitionOrderId || !washTransitionCurrentStatus) return;
+    
+    const currentOrders = orders.map(o => {
+      if (o.id === washTransitionOrderId) {
+        return {
+          ...o,
+          clothesCount: count,
+          status: OrderStatus.DICUCI,
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return o;
+    });
+
+    LaughDryDatabase.saveOrders(currentOrders);
+    setOrders(currentOrders);
+    LaughDryDatabase.logActivity(
+      currentUser.id, 
+      currentUser.name, 
+      currentUser.role, 
+      'STATUS_TRANSITION', 
+      `Mengubah status order ord-${washTransitionOrderId.substring(4)} dari [${washTransitionCurrentStatus}] ke [Dicuci] dengan pencatatan jumlah pakaian: ${count} pcs`
+    );
+    loadDB();
+    showToast(`Status Order berhasil diubah ke [Dicuci] (Jumlah: ${count} pcs)`);
+
+    // Reset transition states
+    setShowWashInputModal(false);
+    setWashTransitionOrderId(null);
+    setWashTransitionCurrentStatus(null);
+    setWashClothesCountInput('');
   };
 
   const updateOrderStatus = (orderId: string, nextStatus: OrderStatus, currentStatus: OrderStatus) => {
@@ -1027,7 +1346,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   };
 
   return (
-    <div className="space-y-6" id="employee-console-root">
+    <div className="space-y-6 pb-24 md:pb-6" id="employee-console-root">
       {/* Toast Alert */}
       {toastMessage && (
         <div className="fixed top-5 right-5 z-50 flex items-center gap-2 bg-[#0F172A] border border-slate-800 text-[#38BDF8] px-4 py-3 rounded-xl shadow-2xl animate-bounce">
@@ -1044,7 +1363,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
           </div>
           <div className="text-xs">
             <div className="font-bold text-slate-800 text-sm">Kasir: {currentUser.name}</div>
-            <div className="text-slate-500 font-mono">Bekerja di: <span className="text-sky-800 font-bold">Cabang Utama Bintaro (br-1)</span></div>
+            <div className="text-slate-500 font-mono">Bekerja di: <span className="text-sky-800 font-bold">{branches.find(b => b.id === currentUser.branchId)?.name || 'Laundry Kita Sumbawa'} ({currentUser.branchId || 'br-1'})</span></div>
           </div>
         </div>
 
@@ -1875,6 +2194,11 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                               }`}>
                                 {o.paymentStatus} ({o.paymentMethod})
                               </span>
+                              {o.clothesCount !== undefined && o.clothesCount > 0 && (
+                                <span className="text-[8px] font-black bg-indigo-50 text-indigo-700 border border-indigo-150 px-1 py-0.25 rounded-md flex items-center gap-0.5">
+                                  👕 {o.clothesCount} Pcs
+                                </span>
+                              )}
                             </div>
                             <div className="text-[9px] text-slate-500 mt-1 space-y-0.5 bg-slate-50 p-1.5 rounded-lg border border-slate-100 font-sans">
                               <div className="flex items-center justify-between">
@@ -2190,39 +2514,81 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                       Belum ada data riwayat presensi kehadiran tercatat.
                     </div>
                   ) : (
-                    attendanceRecords.map((r) => {
+                     attendanceRecords.map((r) => {
                       const branchName = branches.find(b => b.id === r.branchId)?.name || 'Cabang Utama';
                       return (
-                        <div key={r.id} className="p-3 bg-white border border-slate-205 rounded-2xl shadow-xs text-xs space-y-1.5 hover:border-slate-350 transition">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <span className="font-extrabold text-slate-800 block">{r.userName}</span>
-                              <span className="text-[9.5px] text-slate-400 font-medium">{branchName}</span>
+                        <div key={r.id} className="p-3 bg-white border border-slate-205 rounded-2xl shadow-xs text-xs space-y-2 hover:border-slate-350 transition">
+                          
+                          <div className="flex gap-2.5 items-start">
+                            {r.photoUrl && (
+                              <img src={r.photoUrl} alt="Selfie" className="w-[38px] h-[38px] rounded-full object-cover border border-slate-200 shrink-0" referrerPolicy="no-referrer" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <span className="font-extrabold text-slate-800 block truncate">{r.userName}</span>
+                                  <span className="text-[9.5px] text-slate-400 font-medium leading-none">{branchName}</span>
+                                </div>
+                                <span className={`p-1 px-2 py-0.5 rounded-full text-[8.5px] font-black ${
+                                  r.status === 'Hadir' 
+                                    ? 'bg-emerald-50 text-emerald-600 border border-emerald-150 animate-pulse' 
+                                    : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                }`}>
+                                  {r.status}
+                                </span>
+                              </div>
                             </div>
-                            <span className={`p-1 px-2.5 rounded-full text-[9px] font-black ${
-                              r.status === 'Hadir' 
-                                ? 'bg-emerald-50 text-emerald-600 border border-emerald-150 animate-pulse' 
-                                : 'bg-slate-100 text-slate-600 border border-slate-200'
-                            }`}>
-                              {r.status}
-                            </span>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100/70 text-[10px] font-mono text-slate-500">
+                          <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100/70 text-[9.5px] font-mono text-slate-500">
                             <div>
                               <span className="text-slate-400">Masuk:</span> <br />
-                              <strong className="text-slate-655">{new Date(r.checkIn).toLocaleString('id-ID')} WIB</strong>
+                              <strong className="text-slate-655">{new Date(r.checkIn).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})} ({new Date(r.checkIn).toLocaleDateString('id-ID', {day:'numeric', month:'short'})})</strong>
                             </div>
                             <div>
                               <span className="text-slate-400">Keluar:</span> <br />
                               <strong className="text-slate-655">
-                                {r.checkOut ? `${new Date(r.checkOut).toLocaleString('id-ID')} WIB` : '⏳ Aktif Bekerja...'}
+                                {r.checkOut ? `${new Date(r.checkOut).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})} (${new Date(r.checkOut).toLocaleDateString('id-ID', {day:'numeric', month:'short'})})` : '⏳ Bekerja...'}
                               </strong>
                             </div>
                           </div>
 
+                          {/* Cash Reconciliation Summary details on card */}
+                          {(r.startingCashDrawer !== undefined || r.endingCashDrawerInput !== undefined) && (
+                            <div className="bg-slate-50/70 p-2 rounded-xl text-[9.5px] font-mono grid grid-cols-2 gap-1.5 text-slate-550 border border-slate-100/50">
+                              {r.startingCashDrawer !== undefined && (
+                                <div>
+                                  <span className="text-slate-400 text-[8.5px] block">KAS DRIFT MASUK:</span>
+                                  <strong className="text-slate-700">Rp {r.startingCashDrawer.toLocaleString('id-ID')}</strong>
+                                </div>
+                              )}
+                              {r.endingCashDrawerInput !== undefined && (
+                                <div>
+                                  <span className="text-slate-400 text-[8.5px] block">KAS DRAWER FISIK CO:</span>
+                                  <strong className="text-slate-700">Rp {r.endingCashDrawerInput.toLocaleString('id-ID')}</strong>
+                                </div>
+                              )}
+                              {r.expectedCashBalance !== undefined && (
+                                <div className="col-span-2 pt-1 mt-0.5 border-t border-slate-200/50 flex justify-between items-center text-[9px]">
+                                  <span>Hitungan Sistem: <strong className="text-slate-600 font-bold">Rp {r.expectedCashBalance.toLocaleString('id-ID')}</strong></span>
+                                  <span className="font-extrabold uppercase">
+                                    Selisih:{' '}
+                                    <span className={r.cashDifference === 0 ? "text-emerald-600 bg-emerald-50 px-1 py-0.25 rounded" : "text-rose-600 bg-rose-50 px-1 py-0.25 rounded"}>
+                                      {r.cashDifference === 0 ? "COCOK" : `Rp ${r.cashDifference?.toLocaleString('id-ID')}`}
+                                    </span>
+                                  </span>
+                                </div>
+                              )}
+                              {r.reconciliationNotes && (
+                                <div className="col-span-2 text-[9px] text-rose-600 italic leading-snug pt-0.5">
+                                  ⚠️ Catatan: {r.reconciliationNotes}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           {r.workDuration !== undefined && (
-                            <div className="text-[10px] text-slate-500 font-mono bg-slate-50 p-1.5 px-2 rounded-xl flex justify-between">
+                            <div className="text-[10px] text-slate-500 font-mono bg-slate-50/50 p-1.5 px-2 rounded-xl flex justify-between">
                               <span>Durasi Sesi Kerja:</span>
                               <strong className="text-slate-700 font-extrabold">
                                 {Math.floor(r.workDuration / 60)} Jam {r.workDuration % 60} Menit
@@ -2249,21 +2615,68 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
       {/* MOBILE QUICK ACCESS FLOAT ACTION BUTTON (FAB) FOR NEW ORDERS */}
       {activeMenuTab !== 'input_transaksi' && (
-        <div className="fixed bottom-6 right-6 z-[45] md:hidden animate-bounce" style={{ animationDuration: '3s' }}>
+        <div className="fixed bottom-20 right-5 z-[45] md:hidden animate-bounce" style={{ animationDuration: '3s' }}>
           <button
             type="button"
             onClick={() => {
               setActiveMenuTab('input_transaksi');
               showToast("⚡ Silakan Pilih Pelanggan untuk mulai pesanan baru!");
             }}
-            className="p-4 bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-extrabold rounded-full shadow-2xl flex items-center justify-center gap-2 border-2 border-white hover:scale-105 active:scale-95 transition-all text-xs uppercase tracking-wide cursor-pointer"
+            className="p-3.5 bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-extrabold rounded-full shadow-xl flex items-center justify-center gap-1.5 border-2 border-white hover:scale-105 active:scale-[0.93] transition-all text-[11px] uppercase tracking-wide cursor-pointer"
             id="mobile-fab-new-order"
           >
-            <Plus className="w-5 h-5" />
+            <Plus className="w-4 h-4" />
             <span>Pesanan Baru</span>
           </button>
         </div>
       )}
+
+      {/* MOBILE BOTTOM NAVIGATION BAR BAR TAB MENU */}
+      <div className="fixed bottom-0 left-0 right-0 z-45 bg-white/95 backdrop-blur-md border-t border-slate-150 shadow-2xl py-2 px-3 md:hidden flex justify-around items-center select-none" id="mobile-bottom-nav">
+        {[
+          { key: 'input_transaksi', icon: <ShoppingCart className="w-5 h-5" />, label: 'Transaksi' },
+          { key: 'antrean_cucian', icon: <Clock className="w-5 h-5" />, label: 'Antrean', badge: orders.filter(o => o.branchId === currentUser.branchId && o.status !== OrderStatus.SELESAI && o.status !== OrderStatus.DIBATALKAN).length },
+          { key: 'manajemen_pelanggan', icon: <UserCheck className="w-5 h-5" />, label: 'Pelanggan' },
+          { key: 'input_pengeluaran', icon: <DollarSign className="w-5 h-5" />, label: 'Pengeluaran' },
+          { key: 'absensi_harian', icon: <FileCheck2 className="w-5 h-5" />, label: 'Presensi' }
+        ].map((item) => {
+          const isActive = activeMenuTab === item.key;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => {
+                setActiveMenuTab(item.key as any);
+              }}
+              className="flex flex-col items-center justify-center flex-1 py-1 px-1 relative transition-all duration-150 active:scale-90 text-center cursor-pointer"
+              id={`mob-nav-btn-${item.key}`}
+            >
+              <div className={`p-1.5 rounded-full relative transition-all duration-200 ${
+                isActive 
+                  ? 'bg-sky-500/10 text-sky-600 scale-110' 
+                  : 'text-slate-450 hover:text-slate-750'
+              }`}>
+                {item.icon}
+                {item.badge !== undefined && item.badge > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center border border-white">
+                    {item.badge}
+                  </span>
+                )}
+              </div>
+              <span className={`text-[9px] mt-0.5 font-bold tracking-tight transition-all duration-200 ${
+                isActive ? 'text-sky-600 font-extrabold' : 'text-slate-450'
+              }`}>
+                {item.label}
+              </span>
+              
+              {/* Subtle active underline dot */}
+              {isActive && (
+                <span className="absolute bottom-0 w-1.5 h-1.5 rounded-full bg-sky-500 animate-fadeIn" />
+              )}
+            </button>
+          );
+        })}
+      </div>
 
       {/* 1. COMPREHENSIVE INVOICE & WHATSAPP MOCK RECEIPT DIALOG MODAL */}
       {showInvoiceModal && activeInvoice && (
@@ -2443,6 +2856,293 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                 Tembak Scan & Show
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL GEOFENCED CAMERA ATTENDANCE & CASH RECONCILIATION */}
+      {/* ========================================================= */}
+      {showAttendanceModal && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fadeIn" id="modal-attendance-camera-reconciliation">
+          <div className="bg-white rounded-3xl overflow-hidden max-w-lg w-full border border-slate-100 shadow-2xl flex flex-col font-sans max-h-[92vh]">
+            
+            {/* Modal Title Banner */}
+            <div className="bg-slate-900 px-6 py-5 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 bg-sky-500/10 border border-sky-500/20 rounded-xl flex items-center justify-center text-sky-400">
+                  <Camera className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-sm tracking-tight border-none">
+                    {attendanceMode === 'checkin' ? '🟢 Presensi Masuk (Check-In Shift)' : '🔴 Presensi Keluar (Check-Out Shift)'}
+                  </h4>
+                  <p className="text-[10px] text-slate-400 tracking-wider font-mono">ID: {currentUser.id} • {currentUser.name}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  stopCameraStream();
+                  setShowAttendanceModal(false);
+                }}
+                className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-all cursor-pointer select-none"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-5 leading-relaxed text-xs text-slate-600">
+              
+              {/* Geofencing Location Verification indicator */}
+              <div className="bg-slate-50 border border-slate-150 p-4 rounded-2xl flex items-start gap-3">
+                <div className="w-8 h-8 bg-sky-50 text-sky-600 border border-sky-100 rounded-lg flex items-center justify-center shrink-0">
+                  <MapPin className="w-4 h-4" />
+                </div>
+                <div className="space-y-1 flex-1">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-slate-500">Validasi Geofencing Outlet Cabang</div>
+                  <strong className="text-slate-800 block leading-tight text-[11px]">{gpsStatusText}</strong>
+                  {gpsDistance !== null && (
+                    <div className="text-[9.5px] font-mono text-slate-400">
+                      Koordinat terdeteksi: {capturedCoordinates?.lat.toFixed(6)}, {capturedCoordinates?.lng.toFixed(6)}
+                      {gpsDistance > 150 ? (
+                        <span className="text-amber-600 font-bold ml-1.5">(⚠️ Berada diluar radius 150 meter cabang)</span>
+                      ) : (
+                        <span className="text-emerald-600 font-bold ml-1.5">(✓ Lokasi valid)</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Flex Grid divided into Camera and Inputs */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                
+                {/* Visual Camera feed block */}
+                <div className="space-y-2.5">
+                  <span className="text-[10px] font-extrabold uppercase text-slate-500 block">FOTO SELFIE WAJAH KASIR</span>
+                  
+                  <div className="relative aspect-[4/3] bg-slate-900 rounded-2xl overflow-hidden border border-slate-200 flex items-center justify-center group shadow-inner">
+                    {capturedPhotoUrl ? (
+                      <img src={capturedPhotoUrl} alt="Selfie captured" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : cameraPermissionGranted === false ? (
+                      <div className="p-4 text-center space-y-2 text-slate-400">
+                        <Camera className="w-8 h-8 text-slate-600 mx-auto" />
+                        <p className="text-[10px] leading-snug">Deteksi kamera tidak aktif / diblokir di sandbox.</p>
+                        <button
+                          type="button"
+                          onClick={triggerMockSelfie}
+                          className="px-3 py-1 bg-sky-600 text-white rounded-lg text-[9.5px] font-black hover:bg-sky-500 transition-all cursor-pointer"
+                        >
+                          Simulasikan Webcam Selfie
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover scale-x-[-1]" />
+                        <div className="absolute inset-0 border-2 border-dashed border-sky-450/40 rounded-2xl pointer-events-none animate-pulse"></div>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="flex gap-1.5">
+                    {!capturedPhotoUrl && cameraPermissionGranted !== false && (
+                      <button
+                        type="button"
+                        onClick={captureSelfieSnapshot}
+                        className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-sky-400 text-[10.5px] font-extrabold rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5"
+                      >
+                        📷 Ambil Foto Selfie
+                      </button>
+                    )}
+                    {capturedPhotoUrl && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCapturedPhotoUrl(null);
+                          startCameraStream();
+                        }}
+                        className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-550 text-[10.5px] font-bold rounded-xl transition-all flex items-center justify-center gap-1.5"
+                      >
+                        🔄 Ambil Ulang Foto
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Cash Drawer inputs section */}
+                <div className="space-y-4">
+                  
+                  {attendanceMode === 'checkin' ? (
+                    <div className="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-100 space-y-3">
+                      <span className="text-[11px] font-extrabold text-emerald-800 block">💰 Cash Drawer Awal</span>
+                      <p className="text-[10px] text-emerald-600 leading-snug">
+                        Input isi uang tunai fisik yang ada di laci saat memulai shift kerja hari ini.
+                      </p>
+                      <div className="space-y-1.5">
+                        <label className="text-[9.5px] font-black uppercase text-slate-500 block">Saldo Kas Awal (IDR):</label>
+                        <input
+                          type="number"
+                          value={startingCashBalanceInput}
+                          onChange={(e) => setStartingCashBalanceInput(e.target.value)}
+                          className="w-full p-2.5 bg-white border border-slate-250 focus:border-emerald-500 rounded-xl text-xs font-bold outline-none text-slate-850"
+                          placeholder="Masukkan saldo kas kasir"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-rose-50/50 p-4 rounded-2xl border border-rose-100 space-y-3">
+                      <span className="text-[11px] font-extrabold text-rose-800 block">💼 Cash Reconciliation Shift</span>
+                      <p className="text-[10px] text-rose-600 leading-snug">
+                        Mencocokkan uang fisik di laci dengan hitungan sistem untuk mendeteksi selisih.
+                      </p>
+                      
+                      <div className="space-y-1.5 bg-white/70 p-2.5 rounded-xl border border-rose-100 text-slate-700 leading-normal">
+                        <div className="flex justify-between items-center text-[10.5px]">
+                          <span>Kas Buku (Sistem):</span>
+                          <strong className="text-slate-900 font-mono">Rp {expectedCashDrawerValue.toLocaleString('id-ID')}</strong>
+                        </div>
+                        <div className="flex justify-between items-center text-[11px] font-black border-t border-rose-100/50 pt-1 mt-1 text-slate-850">
+                          <span>Selisih Keuangan:</span>
+                          <span className={reconciliationVariance === 0 ? "text-emerald-700" : reconciliationVariance > 0 ? "text-sky-700" : "text-rose-700 animate-pulse bg-rose-50 px-1 py-0.25 rounded"}>
+                            {reconciliationVariance === 0 ? "✓ Sesuai (Rp 0)" : `Rp ${reconciliationVariance.toLocaleString('id-ID')}`}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[9.5px] font-black uppercase text-slate-500 block">Uang Fisik Di Laci Tunai (IDR):</label>
+                        <input
+                          type="number"
+                          value={endingCashDrawerInputVal}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setEndingCashDrawerInputVal(val);
+                            const endingCash = parseFloat(val) || 0;
+                            setReconciliationVariance(endingCash - expectedCashDrawerValue);
+                          }}
+                          className="w-full p-2.5 bg-white border border-slate-250 focus:border-rose-500 rounded-xl text-xs font-bold outline-none text-slate-850 text-center text-sm font-black"
+                          placeholder="Fisik uang drawer"
+                        />
+                      </div>
+
+                      {reconciliationVariance !== 0 && (
+                        <div className="space-y-1.5 animate-fadeIn">
+                          <label className="text-[9.5px] font-black uppercase text-rose-700 block text-[9px]">Keterangan Alasan Selisih Kas *Wajib:</label>
+                          <textarea
+                            rows={2}
+                            value={reconciliationNotesVal}
+                            onChange={(e) => setReconciliationNotesVal(e.target.value)}
+                            placeholder="Contoh: Selisih uang kas receh kembalian..."
+                            className="w-full p-2 bg-white border border-rose-250 focus:border-rose-500 rounded-xl text-[11px] outline-none text-rose-800 font-medium placeholder-rose-300"
+                          />
+                        </div>
+                      )}
+
+                    </div>
+                  )}
+
+                  <div className="space-y-1">
+                    <span className="text-[9.5px] font-black uppercase text-slate-500 block">KETERANGAN OPERASIONAL (OPSIONAL)</span>
+                    <input
+                      type="text"
+                      value={attendanceNotes}
+                      onChange={(e) => setAttendanceNotes(e.target.value)}
+                      placeholder="Catatan tambahan harian..."
+                      className="w-full p-2.5 bg-slate-50 border border-slate-250 focus:border-slate-400 rounded-xl text-xs outline-none text-slate-800"
+                    />
+                  </div>
+
+                </div>
+
+              </div>
+
+            </div>
+
+            {/* Modal Actions Footer */}
+            <div className="bg-slate-50 px-6 py-4 border-t border-slate-100 flex items-center gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  stopCameraStream();
+                  setShowAttendanceModal(false);
+                }}
+                className="px-4 py-2.5 bg-white border border-slate-200 hover:bg-slate-100 text-slate-600 font-extrabold rounded-xl transition-all"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={executeSubmitAttendance}
+                className={`px-5 py-2.5 font-black text-white rounded-xl transition-all shadow-md active:scale-95 flex items-center gap-1.5 ${
+                  capturedPhotoUrl 
+                  ? 'bg-slate-900 hover:bg-slate-800 cursor-pointer' 
+                  : 'bg-slate-300 cursor-not-allowed opacity-60'
+                }`}
+                title={!capturedPhotoUrl ? "Silakan ambil foto selfie untuk memverifikasi wajah" : "Kirim presensi"}
+              >
+                Kirim Presensi {attendanceMode === 'checkin' ? 'Check-In' : 'Check-Out'} ➔
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* POPUP INPUT JUMLAH PAKAIAN SEBELUM PROSES CUCI */}
+      {/* ========================================================= */}
+      {showWashInputModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn" id="modal-wash-input">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full border border-slate-100 shadow-2xl space-y-4">
+            <div className="text-center space-y-2">
+              <div className="w-12 h-12 bg-sky-50 text-sky-600 rounded-2xl flex items-center justify-center mx-auto">
+                <Shirt className="w-6 h-6 animate-pulse" />
+              </div>
+              <h4 className="font-extrabold text-slate-900 text-sm">💦 Konfirmasi Proses Cuci</h4>
+              <p className="text-slate-500 text-[11px] leading-relaxed">
+                Anda akan memulai proses pencucian untuk cucian ini. Silakan masukkan <strong>jumlah pakaian</strong> saat ini untuk memastikan keakuratan pelacakan item.
+              </p>
+            </div>
+
+            <form onSubmit={submitWashTransitionWithClothes} className="space-y-4">
+              <div className="space-y-1.5 text-xs">
+                <label className="text-slate-500 font-bold block">
+                  Jumlah Pakaian (Pcs) <span className="text-rose-500 font-black">*Wajib</span>:
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  value={washClothesCountInput}
+                  onChange={(e) => setWashClothesCountInput(e.target.value)}
+                  placeholder="Contoh: 12"
+                  className="w-full bg-slate-50 border border-slate-200 focus:border-sky-500 focus:bg-white rounded-xl p-3 focus:outline-none font-bold text-slate-800 text-center text-lg"
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowWashInputModal(false);
+                    setWashTransitionOrderId(null);
+                    setWashTransitionCurrentStatus(null);
+                    setWashClothesCountInput('');
+                  }}
+                  className="flex-1 py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-extrabold rounded-xl text-xs transition active:scale-[0.98]"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs transition active:scale-[0.98] shadow-md"
+                >
+                  Mulai Cuci ➔
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

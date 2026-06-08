@@ -18,6 +18,8 @@ export interface Branch {
   name: string;
   address: string;
   phone: string;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface Service {
@@ -76,6 +78,7 @@ export interface Order {
   paymentStatus: 'Lunas' | 'Belum Lunas';
   status: OrderStatus;
   notes: string;
+  clothesCount?: number;
   rating?: number;
   feedback?: string;
   createdAt: string; // timestamp ISO
@@ -207,6 +210,12 @@ export interface AttendanceRecord {
   status: 'Hadir' | 'Selesai';
   notes?: string;
   latLong?: string; // Optional coordinates for simulation realism
+  photoUrl?: string; // Base64 or mock image representation of selfie photo
+  startingCashDrawer?: number; // Starting cash input at check-in
+  endingCashDrawerInput?: number; // Physical cash input at checkout
+  expectedCashBalance?: number; // Calculated cash balance expected by system
+  cashDifference?: number; // variance (endingCashDrawerInput - expectedCashBalance)
+  reconciliationNotes?: string; // Reason for cash drawer differences
 }
 
 

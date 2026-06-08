@@ -136,6 +136,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     name: '',
     address: '',
     phone: '',
+    latitude: '',
+    longitude: '',
   });
   const [deleteConfirmBranch, setDeleteConfirmBranch] = useState<Branch | null>(null);
 
@@ -470,6 +472,29 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   };
 
   // Branch database event handlers
+  const detectBranchGPS = () => {
+    if (!navigator.geolocation) {
+      triggerToast("❌ Peramban ini tidak mendukung Layanan GPS Geolocation.");
+      return;
+    }
+    triggerToast("📍 Sedang memindai lokasi satelit GPS...");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setBranchForm(prev => ({
+          ...prev,
+          latitude: position.coords.latitude.toFixed(6),
+          longitude: position.coords.longitude.toFixed(6),
+        }));
+        triggerToast("✅ Lokasi GPS Cabang Berhasil Dideteksi!");
+      },
+      (error) => {
+        console.error("Gagal mendeteksi lokasi GPS:", error);
+        triggerToast("❌ Gagal memindai GPS: " + error.message);
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  };
+
   const handleSaveBranch = (e: React.FormEvent) => {
     e.preventDefault();
     if (!branchForm.name.trim() || !branchForm.address.trim() || !branchForm.phone.trim()) {
@@ -477,13 +502,23 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
       return;
     }
 
+    const latVal = branchForm.latitude ? parseFloat(branchForm.latitude) : undefined;
+    const lngVal = branchForm.longitude ? parseFloat(branchForm.longitude) : undefined;
+
     let updatedBranches = [...branches];
     if (editingBranchId) {
       // Edit mode
       updatedBranches = updatedBranches.map(b => 
-        b.id === editingBranchId ? { ...b, name: branchForm.name.trim(), address: branchForm.address.trim(), phone: branchForm.phone.trim() } : b
+        b.id === editingBranchId ? { 
+          ...b, 
+          name: branchForm.name.trim(), 
+          address: branchForm.address.trim(), 
+          phone: branchForm.phone.trim(),
+          latitude: latVal,
+          longitude: lngVal
+        } : b
       );
-      LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'BRANCH_UPDATE', `Mengubah informasi cabang [${branchForm.name}]`);
+      LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'BRANCH_UPDATE', `Mengubah informasi cabang [${branchForm.name}] berpeta GPS`);
       triggerToast("✅ Informasi cabang berhasil diubah!");
     } else {
       // Create mode
@@ -493,21 +528,29 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
         name: branchForm.name.trim(),
         address: branchForm.address.trim(),
         phone: branchForm.phone.trim(),
+        latitude: latVal,
+        longitude: lngVal
       };
       updatedBranches.push(newBranch);
-      LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'BRANCH_CREATE', `Menambahkan cabang baru [${branchForm.name}]`);
+      LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'BRANCH_CREATE', `Menambahkan cabang baru [${branchForm.name}] perpeta GPS`);
       triggerToast("✅ Cabang baru berhasil ditambahkan!");
     }
 
     LaughDryDatabase.saveBranches(updatedBranches);
     setBranches(updatedBranches);
-    setBranchForm({ name: '', address: '', phone: '' });
+    setBranchForm({ name: '', address: '', phone: '', latitude: '', longitude: '' });
     setShowAddBranch(false);
     setEditingBranchId(null);
   };
 
   const startEditBranch = (b: Branch) => {
-    setBranchForm({ name: b.name, address: b.address, phone: b.phone });
+    setBranchForm({ 
+      name: b.name, 
+      address: b.address, 
+      phone: b.phone,
+      latitude: b.latitude ? b.latitude.toString() : '',
+      longitude: b.longitude ? b.longitude.toString() : ''
+    });
     setEditingBranchId(b.id);
     setShowAddBranch(true);
   };
@@ -4248,6 +4291,46 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                   />
                 </div>
 
+                <div className="bg-slate-100/50 p-4 rounded-2xl border border-slate-200/60 space-y-3 font-sans">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-extrabold uppercase text-slate-600 tracking-wider flex items-center gap-1">
+                      📍 Konfigurasi GPS Cabang (Geofencing Presensi)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={detectBranchGPS}
+                      className="px-3 py-1 bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-700 text-[10px] font-black rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                    >
+                      📡 Deteksi GPS Saat Ini
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div className="space-y-1">
+                      <label className="text-[9.5px] font-extrabold text-slate-500 block">Latitude (Lintang)</label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: -6.2730"
+                        value={branchForm.latitude}
+                        onChange={(e) => setBranchForm({ ...branchForm, latitude: e.target.value })}
+                        className="w-full p-2.5 bg-white border border-slate-200 rounded-lg outline-none text-slate-800 text-xs font-mono"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[9.5px] font-extrabold text-slate-500 block">Longitude (Bujur)</label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: 106.7260"
+                        value={branchForm.longitude}
+                        onChange={(e) => setBranchForm({ ...branchForm, longitude: e.target.value })}
+                        className="w-full p-2.5 bg-white border border-slate-200 rounded-lg outline-none text-slate-800 text-xs font-mono"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-slate-400 italic">
+                    *Koordinat ini digunakan untuk memastikan kasir melakukan presensi masuk & keluar dekat dari lokasi outlet fisik.
+                  </p>
+                </div>
+
                 <div className="flex gap-2 justify-end pt-2">
                   <button
                     type="button"
@@ -4300,6 +4383,17 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                         <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                         <span className="font-mono text-slate-600">{b.phone}</span>
                       </div>
+                      {b.latitude && b.longitude ? (
+                        <div className="flex items-center gap-1.5 text-emerald-700 bg-emerald-50/85 px-2.5 py-1 rounded-xl border border-emerald-150 max-w-max text-[9.5px] font-black uppercase tracking-wider">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          <span>Geofence GPS: {b.latitude.toFixed(4)}, {b.longitude.toFixed(4)}</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-amber-700 bg-amber-50/70 px-2.5 py-1 rounded-xl border border-amber-150 max-w-max text-[9.5px] font-bold uppercase tracking-wider">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-450"></span>
+                          <span>GPS Tanpa Geofencing</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Stats counters */}
@@ -4520,16 +4614,20 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                             let checkOutStr = '⏳--';
                             try { if (r.checkOut) checkOutStr = new Date(r.checkOut).toLocaleString('id-ID') + ' WIB'; } catch(e) {}
                             
-                            return (
+                             return (
                               <tr key={r.id || idx} className="hover:bg-slate-50/50 transition border-b border-slate-50">
                                 <td className="p-4 pl-6">
                                   <div className="flex items-center gap-2.5">
-                                    <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center font-bold text-[11px] text-slate-600 border border-slate-200">
-                                      {r.userName?.charAt(0) || 'K'}
-                                    </div>
+                                    {r.photoUrl ? (
+                                      <img src={r.photoUrl} className="w-9 h-9 rounded-full object-cover border border-slate-200 shadow-sm shrink-0" referrerPolicy="no-referrer" />
+                                    ) : (
+                                      <div className="w-9 h-9 rounded-full bg-slate-105 flex items-center justify-center font-bold text-[11px] text-slate-600 border border-slate-200 shrink-0">
+                                        {r.userName?.charAt(0) || 'K'}
+                                      </div>
+                                    )}
                                     <div>
-                                      <span className="font-extrabold text-slate-800 block">{r.userName}</span>
-                                      <span className="text-[10px] text-slate-400 font-mono">ID: {r.userId}</span>
+                                      <span className="font-extrabold text-slate-800 block leading-tight">{r.userName}</span>
+                                      <span className="text-[10px] text-slate-400 font-mono leading-none block mt-1">ID: {r.userId}</span>
                                     </div>
                                   </div>
                                 </td>
@@ -4551,8 +4649,36 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                                 <td className="p-4 font-mono font-bold text-slate-700 whitespace-nowrap">
                                   {r.status === 'Hadir' ? '⏳ Aktif' : `${Math.floor((r.workDuration || 0) / 60)}j ${(r.workDuration || 0) % 60}m`}
                                 </td>
-                                <td className="p-4 max-w-xs text-slate-500 truncate italic" title={r.notes}>
-                                  {r.notes || '-'}
+                                <td className="p-4 max-w-sm text-slate-600">
+                                  {r.notes && <div className="leading-snug text-[10.5px] text-slate-500 italic pb-1.5 font-medium">💌 {r.notes}</div>}
+                                  {(r.startingCashDrawer !== undefined || r.endingCashDrawerInput !== undefined) ? (
+                                    <div className="bg-slate-50 p-2.5 rounded-xl text-[10px] font-mono leading-normal text-slate-650 space-y-0.5 border border-slate-100 pr-3">
+                                      {r.startingCashDrawer !== undefined && (
+                                        <div>• Saldo Kas Awal: <strong className="text-slate-800">Rp {r.startingCashDrawer.toLocaleString('id-ID')}</strong></div>
+                                      )}
+                                      {r.endingCashDrawerInput !== undefined && (
+                                        <div>• Fisik Laci Keluar: <strong className="text-slate-800">Rp {r.endingCashDrawerInput.toLocaleString('id-ID')}</strong></div>
+                                      )}
+                                      {r.expectedCashBalance !== undefined && (
+                                        <div>• Kas Hitung Buku: <strong className="text-slate-800 font-bold">Rp {r.expectedCashBalance.toLocaleString('id-ID')}</strong></div>
+                                      )}
+                                      {r.cashDifference !== undefined && (
+                                        <div className="pt-0.5 mt-1 border-t border-slate-200/50 flex justify-between">
+                                          <span>STATUS REKONSILIASI:</span>
+                                          <strong className={r.cashDifference === 0 ? "text-emerald-600 font-extrabold bg-emerald-50 px-1 rounded" : "text-rose-600 font-extrabold bg-rose-50 px-1 rounded animate-pulse"}>
+                                            {r.cashDifference === 0 ? "✓ COCOK (Rp 0)" : `Rp ${r.cashDifference.toLocaleString('id-ID')}`}
+                                          </strong>
+                                        </div>
+                                      )}
+                                      {r.reconciliationNotes && (
+                                        <div className="text-[10px] text-rose-600 italic font-sans leading-snug pt-1 font-bold">
+                                          ⚠️ Alasan Selisih: {r.reconciliationNotes}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-400 font-sans font-semibold text-[10px] italic">- (Shift lama)</span>
+                                  )}
                                 </td>
                                 <td className="p-4 pr-6 text-right font-mono text-[10.5px] text-rose-500 whitespace-nowrap">
                                   📍 {r.latLong || '-'}
