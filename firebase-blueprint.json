@@ -94,6 +94,24 @@
         "bluetoothPrinterAddress": { "type": "string" }
       },
       "required": ["logoUrl", "pointsMultiplier", "pointsValue", "bluetoothPrinterAddress"]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Tabel Absensi Karyawan harian",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "branchId": { "type": "string" },
+        "checkIn": { "type": "string", "format": "date-time" },
+        "checkOut": { "type": "string", "format": "date-time" },
+        "workDuration": { "type": "integer" },
+        "status": { "type": "string", "enum": ["Hadir", "Selesai"] },
+        "notes": { "type": "string" },
+        "latLong": { "type": "string" }
+      },
+      "required": ["id", "userId", "userName", "branchId", "checkIn", "status"]
     }
   },
   "firestore": {
@@ -120,6 +138,10 @@
     "/settings/{settingId}": {
       "schema": "SystemSettings",
       "description": "Koleksi pengaturan sistem"
+    },
+    "/attendance/{attendanceId}": {
+      "schema": "AttendanceRecord",
+      "description": "Koleksi pencatatan absensi karyawan"
     }
   }
 }

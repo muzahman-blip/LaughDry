@@ -1817,100 +1817,117 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     else if (o.status === OrderStatus.SIAP_DIAMBIL) nextStepLabel = 'Serahkan 🎉';
 
                     return (
-                      <div
-                        key={o.id}
-                        className="bg-white p-3 border border-slate-150 rounded-xl hover:border-sky-300 transition-all shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-2.5 animate-scaleIn text-slate-750"
-                      >
-                        {/* Col 1: Invoice & Status */}
-                        <div className="flex items-start gap-2 min-w-[140px]">
-                          <div className="space-y-0.5">
-                            <span className="font-mono font-black text-slate-900 text-[11px] bg-slate-100 border border-slate-150 px-1.5 py-0.5 rounded-md block w-fit">
-                              {o.invoiceNumber}
-                            </span>
-                            <span className={`inline-block px-1.5 py-0.25 rounded text-[8px] font-black text-white uppercase tracking-wider ${
-                              o.status === OrderStatus.ANTRI ? 'bg-amber-500' :
-                              o.status === OrderStatus.DICUCI ? 'bg-sky-500' :
-                              o.status === OrderStatus.DISETRIKA_DILIPAT ? 'bg-violet-550' :
-                              o.status === OrderStatus.DIKEMAS ? 'bg-fuchsia-500' :
-                              o.status === OrderStatus.SIAP_DIAMBIL ? 'bg-teal-600' : 'bg-emerald-600'
-                            }`}>
-                              {o.status === OrderStatus.ANTRI ? '🕒 Antri' :
-                               o.status === OrderStatus.DICUCI ? '💦 Cuci' :
-                               o.status === OrderStatus.DISETRIKA_DILIPAT ? '👔 Setrika/Lipat' :
-                               o.status === OrderStatus.DIKEMAS ? '📦 Kemas' :
-                               o.status === OrderStatus.SIAP_DIAMBIL ? '✅ Siap Ambil' : '🏆 Selesai'}
-                            </span>
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-bold text-slate-800 text-[11px] truncate">{o.customerName}</p>
-                            <p className="text-slate-400 font-mono text-[9px] truncate">{o.customerPhone}</p>
-                          </div>
+                      <div className="relative overflow-hidden rounded-xl bg-rose-500 w-full" key={o.id}>
+                        {/* Swipe indicator background */}
+                        <div className="absolute inset-0 bg-rose-500 flex items-center justify-end px-6 text-white text-[10px] font-black rounded-xl select-none">
+                          <span className="flex items-center gap-1 font-sans animate-pulse">
+                            🗑️ Lepas Untuk Hapus
+                          </span>
                         </div>
 
-                        {/* Col 2: Services & Pricing */}
-                        <div className="flex-1 min-w-0 pr-2">
-                          <p className="text-[10.5px] text-slate-500 font-bold truncate">
-                            {o.items.map(it => it.serviceName).join(', ')}
-                          </p>
-                          <div className="flex items-center gap-1.5 mt-0.5 text-[10px]">
-                            <span className="font-extrabold text-slate-800">Rp {o.totalAmount.toLocaleString()}</span>
-                            <span className={`text-[8px] font-extrabold px-1 rounded-full ${
-                              o.paymentStatus === 'Lunas' ? 'bg-sky-50 text-sky-705' : 'bg-rose-50 text-rose-600'
-                            }`}>
-                              {o.paymentStatus} ({o.paymentMethod})
-                            </span>
-                          </div>
-                          <div className="text-[9px] text-slate-500 mt-1 space-y-0.5 bg-slate-50 p-1.5 rounded-lg border border-slate-100 font-sans">
-                            <div className="flex items-center justify-between">
-                              <span className="text-slate-400">📥 Masuk:</span>
-                              <span className="font-semibold text-slate-700">{new Date(o.createdAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                        <motion.div
+                          drag="x"
+                          dragDirectionLock
+                          dragConstraints={{ left: -140, right: 0 }}
+                          dragElastic={{ left: 0.3, right: 0.05 }}
+                          onDragEnd={(event, info) => {
+                            if (info.offset.x < -80) {
+                              handleDeleteOrder(o.id);
+                            }
+                          }}
+                          className="bg-white p-3 border border-slate-150 rounded-xl hover:border-sky-300 transition-all shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-2.5 text-slate-750 relative z-10 w-full touch-pan-y cursor-grab active:cursor-grabbing"
+                        >
+                          {/* Col 1: Invoice & Status */}
+                          <div className="flex items-start gap-2 min-w-[140px] pointer-events-none select-none">
+                            <div className="space-y-0.5">
+                              <span className="font-mono font-black text-slate-900 text-[11px] bg-slate-100 border border-slate-150 px-1.5 py-0.5 rounded-md block w-fit">
+                                {o.invoiceNumber}
+                              </span>
+                              <span className={`inline-block px-1.5 py-0.25 rounded text-[8px] font-black text-white uppercase tracking-wider ${
+                                o.status === OrderStatus.ANTRI ? 'bg-amber-500' :
+                                o.status === OrderStatus.DICUCI ? 'bg-sky-500' :
+                                o.status === OrderStatus.DISETRIKA_DILIPAT ? 'bg-violet-550' :
+                                o.status === OrderStatus.DIKEMAS ? 'bg-fuchsia-500' :
+                                o.status === OrderStatus.SIAP_DIAMBIL ? 'bg-teal-600' : 'bg-emerald-600'
+                              }`}>
+                                {o.status === OrderStatus.ANTRI ? '🕒 Antri' :
+                                 o.status === OrderStatus.DICUCI ? '💦 Cuci' :
+                                 o.status === OrderStatus.DISETRIKA_DILIPAT ? '👔 Setrika/Lipat' :
+                                 o.status === OrderStatus.DIKEMAS ? '📦 Kemas' :
+                                 o.status === OrderStatus.SIAP_DIAMBIL ? '✅ Siap Ambil' : '🏆 Selesai'}
+                              </span>
                             </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-slate-400">⏳ Estimasi:</span>
-                              <span className="font-semibold text-slate-700">{new Date(o.estimatedCompletion).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                            <div className="min-w-0">
+                              <p className="font-bold text-slate-800 text-[11px] truncate">{o.customerName}</p>
+                              <p className="text-slate-400 font-mono text-[9px] truncate">{o.customerPhone}</p>
                             </div>
                           </div>
-                        </div>
 
-                        {/* Col 3: Actions */}
-                        <div className="flex items-center gap-1.5 justify-end self-end md:self-center">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setActiveInvoice(o);
-                              setShowInvoiceChoiceModal(true);
-                            }}
-                            className="px-2 py-1 bg-white hover:bg-sky-50 border border-slate-200 text-sky-850 rounded-lg text-[9.5px] font-bold transition flex items-center gap-1 cursor-pointer"
-                          >
-                            📄 Struk
-                          </button>
+                          {/* Col 2: Services & Pricing */}
+                          <div className="flex-1 min-w-0 pr-2 pointer-events-none select-none">
+                            <p className="text-[10.5px] text-slate-500 font-bold truncate">
+                              {o.items.map(it => it.serviceName).join(', ')}
+                            </p>
+                            <div className="flex items-center gap-1.5 mt-0.5 text-[10px]">
+                              <span className="font-extrabold text-slate-800">Rp {o.totalAmount.toLocaleString()}</span>
+                              <span className={`text-[8px] font-extrabold px-1 rounded-full ${
+                                o.paymentStatus === 'Lunas' ? 'bg-sky-50 text-sky-705' : 'bg-rose-50 text-rose-600'
+                              }`}>
+                                {o.paymentStatus} ({o.paymentMethod})
+                              </span>
+                            </div>
+                            <div className="text-[9px] text-slate-500 mt-1 space-y-0.5 bg-slate-50 p-1.5 rounded-lg border border-slate-100 font-sans">
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-400">📥 Masuk:</span>
+                                <span className="font-semibold text-slate-700">{new Date(o.createdAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-400">⏳ Estimasi:</span>
+                                <span className="font-semibold text-slate-700">{new Date(o.estimatedCompletion).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                              </div>
+                            </div>
+                          </div>
 
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditOrderModal(o)}
-                            className="px-2 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-150 rounded-lg text-[9.5px] font-extrabold transition cursor-pointer"
-                          >
-                            ✏️ Edit Jasa
-                          </button>
-
-                          {nextStepLabel && (
+                          {/* Col 3: Actions */}
+                          <div className="flex items-center gap-1.5 justify-end self-end md:self-center">
                             <button
                               type="button"
-                              onClick={() => handleTransitionStatus(o.id, o.status)}
-                              className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg text-[10px] transition cursor-pointer"
+                              onClick={() => {
+                                setActiveInvoice(o);
+                                setShowInvoiceChoiceModal(true);
+                              }}
+                              className="px-2 py-1 bg-white hover:bg-sky-50 border border-slate-200 text-sky-850 rounded-lg text-[9.5px] font-bold transition flex items-center gap-1 cursor-pointer"
                             >
-                              <span>👉 {nextStepLabel}</span>
+                              📄 Struk
                             </button>
-                          )}
 
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteOrder(o.id)}
-                            className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg text-[9.5px] font-black transition flex items-center gap-1 cursor-pointer"
-                          >
-                            🗑️ Hapus
-                          </button>
-                        </div>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditOrderModal(o)}
+                              className="px-2 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-150 rounded-lg text-[9.5px] font-extrabold transition cursor-pointer"
+                            >
+                              ✏️ Edit Jasa
+                            </button>
+
+                            {nextStepLabel && (
+                              <button
+                                type="button"
+                                onClick={() => handleTransitionStatus(o.id, o.status)}
+                                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-lg text-[10px] transition cursor-pointer"
+                              >
+                                <span>👉 {nextStepLabel}</span>
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteOrder(o.id)}
+                              className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg text-[9.5px] font-black transition flex items-center gap-1 cursor-pointer"
+                            >
+                              🗑️ Hapus
+                            </button>
+                          </div>
+                        </motion.div>
                       </div>
                     );
                   });
@@ -2229,6 +2246,24 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
         </motion.div>
       )}
     </AnimatePresence>
+
+      {/* MOBILE QUICK ACCESS FLOAT ACTION BUTTON (FAB) FOR NEW ORDERS */}
+      {activeMenuTab !== 'input_transaksi' && (
+        <div className="fixed bottom-6 right-6 z-[45] md:hidden animate-bounce" style={{ animationDuration: '3s' }}>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveMenuTab('input_transaksi');
+              showToast("⚡ Silakan Pilih Pelanggan untuk mulai pesanan baru!");
+            }}
+            className="p-4 bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-extrabold rounded-full shadow-2xl flex items-center justify-center gap-2 border-2 border-white hover:scale-105 active:scale-95 transition-all text-xs uppercase tracking-wide cursor-pointer"
+            id="mobile-fab-new-order"
+          >
+            <Plus className="w-5 h-5" />
+            <span>Pesanan Baru</span>
+          </button>
+        </div>
+      )}
 
       {/* 1. COMPREHENSIVE INVOICE & WHATSAPP MOCK RECEIPT DIALOG MODAL */}
       {showInvoiceModal && activeInvoice && (

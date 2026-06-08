@@ -35,5 +35,10 @@ service cloud.firestore {
     match /settings/{settingId} {
       allow read, write: if true;
     }
+
+    // Rule for attendance
+    match /attendance/{attendanceId} {
+      allow read, write: if true;
+    }
   }
 }

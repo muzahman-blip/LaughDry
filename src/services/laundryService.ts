@@ -10,8 +10,8 @@ import {
   where, 
   orderBy 
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { Order, OrderStatus, Customer, Service, Expense, Branch, SystemSettings } from '../types';
+import { db, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
+import { Order, OrderStatus, Customer, Service, Expense, Branch, SystemSettings, AttendanceRecord } from '../types';
 
 export class LaundryService {
   /**
@@ -20,10 +20,11 @@ export class LaundryService {
   static async addOrder(order: Order): Promise<void> {
     const path = `orders/${order.id}`;
     try {
-      await setDoc(doc(db, 'orders', order.id), {
+      const sanitizedData = sanitizeFirestoreData({
         ...order,
         updatedAt: new Date().toISOString()
       });
+      await setDoc(doc(db, 'orders', order.id), sanitizedData);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
     }
@@ -88,7 +89,7 @@ export class LaundryService {
   static async saveService(service: Service): Promise<void> {
     const path = `services/${service.id}`;
     try {
-      await setDoc(doc(db, 'services', service.id), service);
+      await setDoc(doc(db, 'services', service.id), sanitizeFirestoreData(service));
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
     }
@@ -118,7 +119,7 @@ export class LaundryService {
   static async saveCustomer(customer: Customer): Promise<void> {
     const path = `customers/${customer.id}`;
     try {
-      await setDoc(doc(db, 'customers', customer.id), customer);
+      await setDoc(doc(db, 'customers', customer.id), sanitizeFirestoreData(customer));
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
     }
@@ -196,7 +197,7 @@ export class LaundryService {
   static async saveExpense(expense: Expense): Promise<void> {
     const path = `expenses/${expense.id}`;
     try {
-      await setDoc(doc(db, 'expenses', expense.id), expense);
+      await setDoc(doc(db, 'expenses', expense.id), sanitizeFirestoreData(expense));
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
     }
@@ -238,7 +239,7 @@ export class LaundryService {
   static async saveBranch(branch: Branch): Promise<void> {
     const path = `branches/${branch.id}`;
     try {
-      await setDoc(doc(db, 'branches', branch.id), branch);
+      await setDoc(doc(db, 'branches', branch.id), sanitizeFirestoreData(branch));
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
     }
@@ -267,7 +268,39 @@ export class LaundryService {
   static async saveSettings(settings: SystemSettings): Promise<void> {
     const path = 'settings/system';
     try {
-      await setDoc(doc(db, 'settings', 'system'), settings);
+      await setDoc(doc(db, 'settings', 'system'), sanitizeFirestoreData(settings));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  }
+
+  /**
+   * Fetch all attendance records from Firestore
+   */
+  static async getAttendanceRecords(): Promise<AttendanceRecord[]> {
+    const path = 'attendance';
+    try {
+      const snapshot = await getDocs(collection(db, 'attendance'));
+      const records: AttendanceRecord[] = [];
+      snapshot.forEach((doc) => {
+        records.push(doc.data() as AttendanceRecord);
+      });
+      // Sort by checkIn descending in memory
+      records.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime());
+      return records;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, path);
+      return [];
+    }
+  }
+
+  /**
+   * Save an attendance record to Firestore
+   */
+  static async saveAttendanceRecord(record: AttendanceRecord): Promise<void> {
+    const path = `attendance/${record.id}`;
+    try {
+      await setDoc(doc(db, 'attendance', record.id), sanitizeFirestoreData(record));
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
     }

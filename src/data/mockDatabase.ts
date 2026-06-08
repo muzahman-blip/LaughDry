@@ -240,6 +240,12 @@ export class LaughDryDatabase {
         await LaundryService.saveSettings(INITIAL_SETTINGS);
         this.saveKey('settings', INITIAL_SETTINGS);
       }
+
+      // 7. Attendance
+      const attendance = await LaundryService.getAttendanceRecords();
+      if (attendance.length > 0) {
+        this.saveKey('attendance', attendance);
+      }
     } catch (e) {
       console.error("Gagal sinkronasi awal Firestore:", e);
     }
@@ -362,7 +368,18 @@ export class LaughDryDatabase {
   public static saveTemplates(data: WhatsAppTemplate[]) { this.saveKey('templates', data); }
 
   public static getAttendance(): AttendanceRecord[] { return this.loadKey('attendance', INITIAL_ATTENDANCE); }
-  public static saveAttendance(data: AttendanceRecord[]) { this.saveKey('attendance', data); }
+  public static saveAttendance(data: AttendanceRecord[]) { 
+    const previous = this.getAttendance();
+    this.saveKey('attendance', data); 
+    
+    // Differential Sync
+    data.forEach(item => {
+      const prevItem = previous.find(p => p.id === item.id);
+      if (!prevItem || JSON.stringify(prevItem) !== JSON.stringify(item)) {
+        LaundryService.saveAttendanceRecord(item).catch(err => console.error("Gagal save attendance ke Firestore:", err));
+      }
+    });
+  }
 
   public static getSettings(): SystemSettings { 
     const settings = this.loadKey('settings', INITIAL_SETTINGS); 

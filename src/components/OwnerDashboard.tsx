@@ -22,6 +22,7 @@ import {
   MessageSquare,
   Shield,
   Download,
+  Upload,
   AlertTriangle,
   Play,
   RotateCcw,
@@ -31,7 +32,8 @@ import {
   QrCode,
   Undo,
   Building,
-  Phone
+  Phone,
+  Smartphone
 } from 'lucide-react';
 import { LaughDryDatabase } from '../data/mockDatabase';
 import { Service, Expense, Branch, Order, OrderStatus, AuditLog, WhatsAppTemplate, Customer, SettingsVersion } from '../types';
@@ -46,7 +48,11 @@ import {
   ResponsiveContainer,
   PieChart,
   Pie,
-  Cell
+  Cell,
+  LineChart,
+  Line,
+  AreaChart,
+  Area
 } from 'recharts';
 
 interface OwnerDashboardProps {
@@ -98,12 +104,17 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     branchId: 'br-1',
   });
 
-  const [activeSubTab, setActiveSubTab] = useState<'analytics' | 'services' | 'expenses' | 'bi' | 'settings' | 'audit' | 'cashiers' | 'branches'>('analytics');
+  const [activeSubTab, setActiveSubTab] = useState<'analytics' | 'services' | 'expenses' | 'bi' | 'settings' | 'audit' | 'cashiers' | 'branches' | 'report' | 'attendance'>('analytics');
+  const [reportStartDate, setReportStartDate] = useState<string>('2026-05-01');
+  const [reportEndDate, setReportEndDate] = useState<string>('2026-06-30');
   const [expandedServiceGroup, setExpandedServiceGroup] = useState<string | null>(null);
   const [activePopupField, setActivePopupField] = useState<'category' | 'unit' | 'promiseDurationUnit' | 'sizeOption' | null>(null);
   const [showToast, setShowToast] = useState<string | null>(null);
   const [showTodayTransactionsModal, setShowTodayTransactionsModal] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
+  const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
+  const [attendanceStaffFilter, setAttendanceStaffFilter] = useState<string>('all');
+  const [attendanceStatusFilter, setAttendanceStatusFilter] = useState<string>('all');
 
   // Owner form states
   const [showEditOwner, setShowEditOwner] = useState(false);
@@ -169,6 +180,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     setTemplates(LaughDryDatabase.getTemplates());
     setSettings(LaughDryDatabase.getSettings());
     setSettingsHistory(LaughDryDatabase.getSettingsHistory());
+    setAttendanceRecords(LaughDryDatabase.getAttendance());
   };
 
   const triggerToast = (msg: string) => {
@@ -533,8 +545,316 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     linkElement.setAttribute('download', exportFileDefaultName);
     linkElement.click();
     
-    LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'DATABASE_BACKUP', 'Melakukan ekspor backup database PostgreSQL (.json)');
+    LaughDryDatabase.logActivity('usr-1', getOwnerName(), 'owner', 'DATABASE_BACKUP', 'Melakukan ekspor backup database PostgreSQL (.json)');
     triggerToast("File Backup PostgreSQL berhasil diunduh!");
+  };
+
+  const handleExportCSV = () => {
+    if (orders.length === 0) {
+      triggerToast("⚠️ Tidak ada data transaksi untuk diekspor!");
+      return;
+    }
+
+    const headers = [
+      "ID_Transaksi",
+      "No_Nota",
+      "ID_Pelanggan",
+      "Nama_Pelanggan",
+      "No_HP_Pelanggan",
+      "ID_Cabang",
+      "Total_Tagihan",
+      "Metode_Pembayaran",
+      "Status_Pembayaran",
+      "Status_Cucian",
+      "Catatan",
+      "Dibuat_Pada",
+      "Diubah_Pada",
+      "Estimasi_Selesai",
+      "Selesai_Pada",
+      "Poin_Didapat",
+      "Poin_Ditukar",
+      "Aroma_Parfum",
+      "ID_Kasir",
+      "Nama_Kasir",
+      "Rincian_Item_JSON"
+    ];
+
+    const escapeCSV = (val: string | number | undefined | null) => {
+      if (val === undefined || val === null) return '""';
+      const str = String(val).replace(/"/g, '""');
+      return `"${str}"`;
+    };
+
+    const csvRows = [headers.join(",")];
+
+    orders.forEach(order => {
+      const row = [
+        escapeCSV(order.id),
+        escapeCSV(order.invoiceNumber),
+        escapeCSV(order.customerId),
+        escapeCSV(order.customerName),
+        escapeCSV(order.customerPhone),
+        escapeCSV(order.branchId),
+        order.totalAmount,
+        escapeCSV(order.paymentMethod),
+        escapeCSV(order.paymentStatus),
+        escapeCSV(order.status),
+        escapeCSV(order.notes),
+        escapeCSV(order.createdAt),
+        escapeCSV(order.updatedAt),
+        escapeCSV(order.estimatedCompletion),
+        escapeCSV(order.completedAt),
+        order.pointsEarned,
+        order.pointsRedeemed || 0,
+        escapeCSV(order.perfume),
+        escapeCSV(order.cashierId),
+        escapeCSV(order.cashierName),
+        escapeCSV(JSON.stringify(order.items))
+      ];
+      csvRows.push(row.join(","));
+    });
+
+    const csvString = csvRows.join("\n");
+    const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `laughdry_transaksi_export_${new Date().toISOString().split('T')[0]}.csv`);
+    link.click();
+
+    LaughDryDatabase.logActivity('usr-1', getOwnerName(), 'owner', 'EXPORT_CSV', `Mengekspor ${orders.length} riwayat transaksi ke format CSV`);
+    triggerToast(`✅ Berhasil mengekspor ${orders.length} transaksi ke CSV!`);
+  };
+
+  const handleImportCSV = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        if (!text) {
+          triggerToast("⚠️ File kosong atau tidak valid!");
+          return;
+        }
+        
+        const lines: string[] = [];
+        let currentLine = "";
+        let inQuotes = false;
+        
+        for (let i = 0; i < text.length; i++) {
+          const char = text[i];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+            currentLine += char;
+          } else if (char === '\n' && !inQuotes) {
+            lines.push(currentLine.trim());
+            currentLine = "";
+          } else {
+            currentLine += char;
+          }
+        }
+        if (currentLine) {
+          lines.push(currentLine.trim());
+        }
+
+        if (lines.length < 2) {
+          triggerToast("⚠️ Format CSV tidak valid (Kurang dari 2 baris)!");
+          return;
+        }
+
+        const headerLine = lines[0];
+        const splitRow = (rowStr: string): string[] => {
+          const result: string[] = [];
+          let cur = "";
+          let inQ = false;
+          for (let i = 0; i < rowStr.length; i++) {
+            const c = rowStr[i];
+            if (c === '"') {
+              inQ = !inQ;
+            } else if (c === ',' && !inQ) {
+              result.push(cur.trim());
+              cur = "";
+            } else {
+              cur += c;
+            }
+          }
+          result.push(cur.trim());
+          return result.map(col => {
+            let cleaned = col;
+            if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
+              cleaned = cleaned.substring(1, cleaned.length - 1);
+            }
+            return cleaned.replace(/""/g, '"');
+          });
+        };
+
+        const headers = splitRow(headerLine);
+        const idIdx = headers.indexOf("ID_Transaksi");
+        const invIdx = headers.indexOf("No_Nota");
+        const custIdIdx = headers.indexOf("ID_Pelanggan");
+        const custNameIdx = headers.indexOf("Nama_Pelanggan");
+        const custPhoneIdx = headers.indexOf("No_HP_Pelanggan");
+        const branchIdIdx = headers.indexOf("ID_Cabang");
+        const totalIdx = headers.indexOf("Total_Tagihan");
+        const payMethodIdx = headers.indexOf("Metode_Pembayaran");
+        const payStatusIdx = headers.indexOf("Status_Pembayaran");
+        const statusIdx = headers.indexOf("Status_Cucian");
+        const notesIdx = headers.indexOf("Catatan");
+        const createdIdx = headers.indexOf("Dibuat_Pada");
+        const updatedIdx = headers.indexOf("Diubah_Pada");
+        const estIdx = headers.indexOf("Estimasi_Selesai");
+        const complIdx = headers.indexOf("Selesai_Pada");
+        const ptsEarnIdx = headers.indexOf("Poin_Didapat");
+        const ptsRedIdx = headers.indexOf("Poin_Ditukar");
+        const perfumeIdx = headers.indexOf("Aroma_Parfum");
+        const cashierIdIdx = headers.indexOf("ID_Kasir");
+        const cashierNameIdx = headers.indexOf("Nama_Kasir");
+        const itemsJsonIdx = headers.indexOf("Rincian_Item_JSON");
+
+        if (invIdx === -1 || custNameIdx === -1 || totalIdx === -1) {
+          triggerToast("Format kolom CSV salah! Pastikan kolom 'No_Nota', 'Nama_Pelanggan', dan 'Total_Tagihan' tersedia.");
+          return;
+        }
+
+        const importedOrders: Order[] = [];
+        
+        for (let k = 1; k < lines.length; k++) {
+          if (!lines[k].trim()) continue;
+          const cols = splitRow(lines[k]);
+          
+          if (cols.length < headers.length - 3) continue;
+
+          const orderId = (idIdx !== -1 && cols[idIdx]) ? cols[idIdx] : `ord-${Date.now()}-${k}`;
+          const invoiceNumber = cols[invIdx];
+          const customerId = (custIdIdx !== -1 && cols[custIdIdx]) ? cols[custIdIdx] : `imported-cust-${k}`;
+          const customerName = cols[custNameIdx];
+          const customerPhone = (custPhoneIdx !== -1 && cols[custPhoneIdx]) ? cols[custPhoneIdx] : "";
+          const branchId = (branchIdIdx !== -1 && cols[branchIdIdx]) ? cols[branchIdIdx] : "br-1";
+          const totalAmount = Number(cols[totalIdx]) || 0;
+          const paymentMethod = ((payMethodIdx !== -1 && cols[payMethodIdx]) ? cols[payMethodIdx] : "Cash") as any;
+          const paymentStatus = ((payStatusIdx !== -1 && cols[payStatusIdx]) ? cols[payStatusIdx] : "Lunas") as any;
+          const status = ((statusIdx !== -1 && cols[statusIdx]) ? cols[statusIdx] : "Selesai") as any;
+          const notes = (notesIdx !== -1 && cols[notesIdx]) ? cols[notesIdx] : "";
+          const createdAt = (createdIdx !== -1 && cols[createdIdx]) ? cols[createdIdx] : new Date().toISOString();
+          const updatedAt = (updatedIdx !== -1 && cols[updatedIdx]) ? cols[updatedIdx] : new Date().toISOString();
+          const estimatedCompletion = (estIdx !== -1 && cols[estIdx]) ? cols[estIdx] : new Date().toISOString();
+          const completedAt = (complIdx !== -1 && cols[complIdx]) ? cols[complIdx] : undefined;
+          const pointsEarned = ptsEarnIdx !== -1 ? (Number(cols[ptsEarnIdx]) || 0) : 0;
+          const pointsRedeemed = ptsRedIdx !== -1 ? (Number(cols[ptsRedIdx]) || 0) : undefined;
+          const perfume = (perfumeIdx !== -1 && cols[perfumeIdx]) ? cols[perfumeIdx] as any : undefined;
+          const cashierId = (cashierIdIdx !== -1 && cols[cashierIdIdx]) ? cols[cashierIdIdx] : undefined;
+          const cashierName = (cashierNameIdx !== -1 && cols[cashierNameIdx]) ? cols[cashierNameIdx] : undefined;
+          
+          let items: any[] = [];
+          if (itemsJsonIdx !== -1 && cols[itemsJsonIdx]) {
+            try {
+              items = JSON.parse(cols[itemsJsonIdx]);
+            } catch {
+              items = [{
+                id: `item-${Date.now()}-${k}`,
+                serviceId: "srv-1",
+                serviceName: "Layanan Hasil Import CSV",
+                price: totalAmount,
+                quantity: 1,
+                subtotal: totalAmount
+              }];
+            }
+          } else {
+            items = [{
+              id: `item-${Date.now()}-${k}`,
+              serviceId: "srv-1",
+              serviceName: "Cuci Satuan Kiloan",
+              price: totalAmount,
+              quantity: 1,
+              subtotal: totalAmount
+            }];
+          }
+
+          const newOrder: Order = {
+            id: orderId,
+            invoiceNumber,
+            customerId,
+            customerName,
+            customerPhone,
+            branchId,
+            items,
+            totalAmount,
+            paymentMethod,
+            paymentStatus,
+            status,
+            notes,
+            createdAt,
+            updatedAt,
+            estimatedCompletion,
+            completedAt,
+            pointsEarned,
+            pointsRedeemed,
+            perfume,
+            cashierId,
+            cashierName
+          };
+          importedOrders.push(newOrder);
+        }
+
+        if (importedOrders.length === 0) {
+          triggerToast("⚠️ Tidak ada data valid yang bisa diimpor.");
+          return;
+        }
+
+        const currentOrders = [...orders];
+        let importCount = 0;
+        
+        importedOrders.forEach(imp => {
+          const existsIdx = currentOrders.findIndex(o => o.id === imp.id || o.invoiceNumber === imp.invoiceNumber);
+          if (existsIdx !== -1) {
+            currentOrders[existsIdx] = imp;
+          } else {
+            currentOrders.push(imp);
+            importCount++;
+          }
+        });
+
+        LaughDryDatabase.saveOrders(currentOrders);
+        setOrders(currentOrders);
+
+        const currentCustomers = [...customers];
+        let addedCustomers = 0;
+        importedOrders.forEach(imp => {
+          const custExists = currentCustomers.some(c => c.id === imp.customerId || c.phone === imp.customerPhone);
+          if (!custExists && imp.customerName) {
+            const newCust: Customer = {
+              id: imp.customerId,
+              name: imp.customerName,
+              phone: imp.customerPhone,
+              address: "Hasil Import CSV",
+              depositBalance: 0,
+              loyaltyPoints: 0,
+              createdAt: imp.createdAt,
+              lastActive: imp.updatedAt
+            };
+            currentCustomers.push(newCust);
+            addedCustomers++;
+          }
+        });
+        if (addedCustomers > 0) {
+          LaughDryDatabase.saveCustomers(currentCustomers);
+          setCustomers(currentCustomers);
+        }
+
+        LaughDryDatabase.logActivity('usr-1', getOwnerName(), 'owner', 'IMPORT_CSV', `Mengimpor ${importedOrders.length} transaksi dari file CSV`);
+        triggerToast(`🎉 Sukses memproses ${importedOrders.length} transaksi (${importCount} baru, ${importedOrders.length - importCount} update) & ${addedCustomers} pelanggan baru!`);
+        
+        if (e.target) {
+          e.target.value = "";
+        }
+      } catch (err: any) {
+        console.error(err);
+        triggerToast(`⚠️ Gagal mengimpor file CSV: ${err.message || err}`);
+      }
+    };
+    reader.readAsText(file);
   };
 
   const handleTemplateChange = (id: string, body: string) => {
@@ -799,8 +1119,35 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           </button>
 
           <button
+            onClick={handleExportCSV}
+            className="flex items-center gap-1.5 px-3 py-2 border border-emerald-250 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-xl text-xs font-semibold tracking-tight transition"
+            id="btn-export-csv"
+            title="Ekspor seluruh riwayat transaksi ke format CSV untuk audit"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            Ekspor CSV
+          </button>
+
+          <label
+            htmlFor="csv-import-file"
+            className="flex items-center gap-1.5 px-3 py-2 border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-xl text-xs font-semibold tracking-tight transition cursor-pointer"
+            id="label-import-csv"
+            title="Impor riwayat transaksi dari file CSV (Restore data)"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            Impor CSV
+            <input
+              type="file"
+              id="csv-import-file"
+              accept=".csv"
+              onChange={handleImportCSV}
+              className="hidden"
+            />
+          </label>
+
+          <button
             onClick={() => setShowResetDbConfirm(true)}
-            className="flex items-center gap-1.5 px-3 py-2 border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl text-xs font-semibold tracking-tight transition"
+            className="flex items-center gap-1.5 px-3 py-2 border border-red-200 bg-red-50 text-red-650 hover:bg-red-100 rounded-xl text-xs font-semibold tracking-tight transition"
             id="btn-reset-db"
             title="Reset system database to seed data"
           >
@@ -829,6 +1176,15 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           id="subtab-bi"
         >
           📊 Business Intelligence (BI)
+        </button>
+        <button
+          onClick={() => setActiveSubTab('report')}
+          className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+            activeSubTab === 'report' ? 'bg-indigo-600 text-white font-extrabold shadow-sm' : 'text-slate-500 hover:bg-slate-100'
+          }`}
+          id="subtab-report"
+        >
+          📈 Laporan Performa
         </button>
         <button
           onClick={() => setActiveSubTab('services')}
@@ -883,6 +1239,15 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           id="subtab-audit"
         >
           🔐 Audit Log Keamanan
+        </button>
+        <button
+          onClick={() => setActiveSubTab('attendance')}
+          className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+            activeSubTab === 'attendance' ? 'bg-indigo-650 text-white font-extrabold shadow-sm' : 'text-slate-500 hover:bg-slate-100'
+          }`}
+          id="subtab-attendance"
+        >
+          📅 Rekap Absensi Karyawan
         </button>
       </div>
 
@@ -3038,6 +3403,75 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             </div>
           </div>
 
+          {/* Android Studio Export Guide Card */}
+          <div className="bg-[#0F172A] text-slate-100 p-6 rounded-3xl border border-slate-800 shadow-xl space-y-4 font-sans">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-850">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-indigo-500/10 rounded-xl text-indigo-400">
+                  <Smartphone className="w-5 h-5 animate-bounce" style={{ animationDuration: '4s' }} />
+                </div>
+                <div>
+                  <h4 className="font-extrabold text-[#38BDF8] text-sm">📱 Android Studio Export & Deployment Guide</h4>
+                  <p className="text-[10.5px] text-slate-400 mt-0.5">Panduan menyatukan kode POS Karyawan & Dasbor Owner untuk dijalankan di HP/Tablet Android.</p>
+                </div>
+              </div>
+              <span className="self-start sm:self-auto px-2 py-0.5 bg-indigo-500/10 border border-indigo-500/25 text-indigo-400 text-[9px] font-bold rounded-lg uppercase tracking-wider">
+                Capacitor Native Configured
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 text-xs text-slate-300">
+              <div className="space-y-3.5">
+                <p className="leading-relaxed">
+                  Sistem **LaughDry Kita** telah dilengkapi dengan **CapacitorJS** (Android Wrapper modern sekelas Ionic). Konfigurasi native beserta direktori folder khusus Android (`/android`) sudah diinisialisasi dan tersinkronisasi dengan baik di workspace.
+                </p>
+
+                <div className="space-y-1 bg-slate-900/40 p-3.5 rounded-xl border border-slate-800/80">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <strong className="font-extrabold text-slate-200">Bagaimana Cara Kerja 1 Database?</strong>
+                  </div>
+                  <p className="text-[11px] text-slate-450 leading-relaxed">
+                    Sistem ini terhubung 100% secara langsung ke **Firebase Firestore**. Seluruh pesanan, absensi, kasir baru, atau log pengeluaran yang dicatat lewat perangkat Android POS di toko fisik akan seketika tersinkronisasi ke server pusat. Owner dapat memantau secara real-time lewat versi Web maupun Android, dan pelanggan pun bisa melacak status baju cucian mereka lewat situs tracking di browser.
+                  </p>
+                </div>
+
+                <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 rounded-xl leading-relaxed text-[11px]">
+                  💡 <strong>Keuntungan Desain:</strong> Di lingkungan Android (Capacitor), aplikasi akan mendeteksi platform secara otomatis untuk menyembunyikan "Situs Tracking" pelanggan sehingga mesin kasir POS Anda tetap aman, rapi, dan steril dari akses luar.
+                </div>
+              </div>
+
+              <div className="space-y-3 font-sans">
+                <strong className="text-white text-[11px] uppercase tracking-wider block">Langkah Menjalankan di Android Studio:</strong>
+                <ol className="list-decimal list-inside space-y-2 text-slate-300 pl-1 leading-relaxed">
+                  <li>
+                    <span className="font-bold text-slate-200">Ekspor Kode Sumber:</span>
+                    <span className="block text-slate-400 pl-4 mt-0.5">Klik tombol gerigi di kanan atas layar Google AI Studio dan pilih menu <strong>"Export to ZIP"</strong> (atau sambungkan ke direktori GitHub Anda).</span>
+                  </li>
+                  <li>
+                    <span className="font-bold text-slate-200">Ekstrak & Pasang Dependensi:</span>
+                    <span className="block text-slate-400 pl-4 mt-0.5">Ekstrak paket ZIP di komputer Anda, lalu jalankan terminal di dalam folder tersebut untuk memasang paket:</span>
+                    <pre className="bg-slate-950 text-[#38BDF8] p-2 rounded-lg font-mono text-[10px] mt-1 ml-4 overflow-x-auto select-all">npm install</pre>
+                  </li>
+                  <li>
+                    <span className="font-bold text-slate-200">Kompilasi & Sinkronisasi Folder Android:</span>
+                    <span className="block text-slate-400 pl-4 mt-0.5">Jalankan script otomatis untuk merakit kode React POS dan memasukkannya ke folder native Android:</span>
+                    <pre className="bg-slate-950 text-[#38BDF8] p-2 rounded-lg font-mono text-[10px] mt-1 ml-4 overflow-x-auto select-all">npm run cap:sync</pre>
+                  </li>
+                  <li>
+                    <span className="font-bold text-slate-200">Buka Proyek di Android Studio:</span>
+                    <span className="block text-slate-400 pl-4 mt-0.5">Buka folder proyek native `/android` dengan aplikasi Android Studio Anda menggunakan perintah:</span>
+                    <pre className="bg-slate-950 text-[#38BDF8] p-2 rounded-lg font-mono text-[10px] mt-1 ml-4 overflow-x-auto select-all">npm run cap:open-android</pre>
+                  </li>
+                  <li>
+                    <span className="font-bold text-slate-200">Jalankan di Handphone / Tablet:</span>
+                    <span className="block text-slate-400 pl-4 mt-0.5">Colok tablet kasir Android Anda menggunakan kabel data (aktifkan USB Debugging di setelan developer HP), pilih perangkat Anda di Android Studio, lalu klik ikon <strong>Run (Segitiga Hijau Play)</strong> untuk memasang aplikasi digital LaughDry langsung di toko Anda!</span>
+                  </li>
+                </ol>
+              </div>
+            </div>
+          </div>
+
         </div>
       )}
 
@@ -3077,6 +3511,404 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
               ))}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 6.5. LAPORAN PERFORMA BULANAN (MONTHLY PERFORMANCE REPORT) */}
+      {activeSubTab === 'report' && (
+        <div className="space-y-6 animate-fadeIn text-xs" id="performance-report-panel">
+          
+          {/* Header Card */}
+          <div className="bg-gradient-to-br from-indigo-900 via-slate-900 to-slate-950 rounded-2xl p-5 text-white border border-indigo-950/40 relative overflow-hidden shadow-lg">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+            <div className="flex items-center gap-2 text-indigo-300 font-bold uppercase tracking-wider text-[10px] mb-1">
+              <TrendingUp className="w-4 h-4 text-indigo-400" />
+              Laporan Performa & Ringkasan Bulanan (Monthly Performance Report)
+            </div>
+            <h3 className="text-base font-bold text-white">Analisis Pendapatan & Volume Transaksi</h3>
+            <p className="text-slate-300 mt-1 leading-relaxed max-w-2xl">
+              Visualisasi metrik keuangan vital, laju order masuk, serta preferensi pembayaran pelanggan di seluruh cabang laundry terhitung berdasarkan opsi rentang tanggal pilihan Anda.
+            </p>
+          </div>
+
+          {/* Date Picker & Filter Control Ribbon */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+              <div>
+                <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Mulai Tanggal</label>
+                <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 focus-within:ring-2 focus-within:ring-indigo-500 font-sans">
+                  <Calendar className="w-4 h-4 text-slate-400" />
+                  <input
+                    type="date"
+                    value={reportStartDate}
+                    onChange={(e) => setReportStartDate(e.target.value)}
+                    className="bg-transparent border-none outline-none focus:ring-0 text-slate-700 text-xs font-semibold"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Sampai Tanggal</label>
+                <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 focus-within:ring-2 focus-within:ring-indigo-500 font-sans">
+                  <Calendar className="w-4 h-4 text-slate-400" />
+                  <input
+                    type="date"
+                    value={reportEndDate}
+                    onChange={(e) => setReportEndDate(e.target.value)}
+                    className="bg-transparent border-none outline-none focus:ring-0 text-slate-700 text-xs font-semibold"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Presets Button Links */}
+            <div className="flex flex-wrap items-center gap-1.5 self-end md:self-center font-sans">
+              <button
+                onClick={() => {
+                  setReportStartDate('2026-05-01');
+                  setReportEndDate('2026-05-31');
+                  triggerToast("📅 Rentang diset ke: Mei 2026");
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                  reportStartDate === '2026-05-01' && reportEndDate === '2026-05-31'
+                    ? 'bg-indigo-500 text-white shadow-sm'
+                    : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Mei 2026
+              </button>
+              <button
+                onClick={() => {
+                  setReportStartDate('2026-06-01');
+                  setReportEndDate('2026-06-30');
+                  triggerToast("📅 Rentang diset ke: Juni 2026");
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                  reportStartDate === '2026-06-01' && reportEndDate === '2026-06-30'
+                    ? 'bg-indigo-500 text-white shadow-sm'
+                    : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Juni 2026
+              </button>
+              <button
+                onClick={() => {
+                  setReportStartDate('2026-05-01');
+                  setReportEndDate('2026-06-30');
+                  triggerToast("📅 Rentang diset ke: Mei & Juni 2026");
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                  reportStartDate === '2026-05-01' && reportEndDate === '2026-06-30'
+                    ? 'bg-indigo-500 text-white shadow-sm'
+                    : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Semua Transaksi
+              </button>
+            </div>
+          </div>
+
+          {/* Core Computations & Local Filter State */}
+          {(() => {
+            const reportOrders = orders.filter(o => {
+              if (selectedBranch !== 'all' && o.branchId !== selectedBranch) return false;
+              const datePart = o.createdAt.split('T')[0];
+              return datePart >= reportStartDate && datePart <= reportEndDate;
+            });
+
+            const totalRev = reportOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+            const totalCount = reportOrders.length;
+            const avgTicketSize = totalCount > 0 ? Math.round(totalRev / totalCount) : 0;
+
+            // Generate daily date chart details
+            const getDaysArray = (startStr: string, endStr: string) => {
+              const resArr = [];
+              const currDt = new Date(startStr);
+              const limitDt = new Date(endStr);
+              let loopSafety = 0;
+              while (currDt <= limitDt && loopSafety < 120) {
+                resArr.push(currDt.toISOString().split('T')[0]);
+                currDt.setDate(currDt.getDate() + 1);
+                loopSafety++;
+              }
+              return resArr;
+            };
+
+            const dayList = getDaysArray(reportStartDate, reportEndDate);
+            const daysReportData = dayList.map(eachDay => {
+              const dayMatches = reportOrders.filter(o => o.createdAt.startsWith(eachDay));
+              const rev = dayMatches.reduce((sum, o) => sum + o.totalAmount, 0);
+              const cnt = dayMatches.length;
+
+              const dateObj = new Date(eachDay);
+              const months = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des"];
+              const labelDate = `${dateObj.getDate()} ${months[dateObj.getMonth()]}`;
+
+              return {
+                rawDate: eachDay,
+                date: labelDate,
+                "Pendapatan": rev,
+                "Jumlah Order": cnt
+              };
+            });
+
+            // Payment breakdown data
+            const payMethodsTotals = reportOrders.reduce((acc, o) => {
+              const mthd = o.paymentMethod || 'Cash';
+              acc[mthd] = (acc[mthd] || 0) + o.totalAmount;
+              return acc;
+            }, {} as Record<string, number>);
+
+            const paymentPieData = Object.entries(payMethodsTotals).map(([name, value]) => ({
+              name,
+              value
+            }));
+
+            const finalPieData = paymentPieData.length > 0 ? paymentPieData : [
+              { name: 'Cash', value: 0 },
+              { name: 'QRIS', value: 0 },
+              { name: 'Transfer', value: 0 },
+              { name: 'Deposit', value: 0 }
+            ];
+
+            const PIE_COLORS = ['#10B981', '#3B82F6', '#6366F1', '#F59E0B'];
+
+            return (
+              <div className="space-y-6">
+                
+                {/* Micro Widgets */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Widget 1 */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Pendapatan (Revenue)</span>
+                      <strong className="text-xl font-black text-slate-900 mt-1 block">Rp {totalRev.toLocaleString('id-ID')}</strong>
+                      <span className="text-[10px] text-emerald-600 font-semibold block mt-1">Pada rentang terpilih</span>
+                    </div>
+                    <div className="p-3 bg-emerald-50 rounded-2xl text-emerald-600">
+                      <DollarSign className="w-6 h-6" />
+                    </div>
+                  </div>
+
+                  {/* Widget 2 */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Volume Transaksi (Lunas)</span>
+                      <strong className="text-xl font-black text-slate-900 mt-1 block">{totalCount} Order masuk</strong>
+                      <span className="text-[10px] text-indigo-600 font-semibold block mt-1">Status pembayaran & proses</span>
+                    </div>
+                    <div className="p-3 bg-indigo-50 rounded-2xl text-indigo-600">
+                      <Package className="w-6 h-6" />
+                    </div>
+                  </div>
+
+                  {/* Widget 3 */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Rata-rata Nilai Order</span>
+                      <strong className="text-xl font-black text-slate-900 mt-1 block">Rp {avgTicketSize.toLocaleString('id-ID')}</strong>
+                      <span className="text-[10px] text-amber-600 font-semibold block mt-1">Average transaction value</span>
+                    </div>
+                    <div className="p-3 bg-amber-50 rounded-2xl text-amber-650 font-bold flex items-center justify-center text-sm font-sans shrink-0">
+                      Rp
+                    </div>
+                  </div>
+                </div>
+
+                {/* Charts Area Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  
+                  {/* Chart Card 1: Revenue Line/Area Chart */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <h4 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
+                        <TrendingUp className="w-4 h-4 text-emerald-500" />
+                        Tren Arus Pendapatan Laundry (IDR)
+                      </h4>
+                      <p className="text-slate-400 text-[10px] mt-0.5 mb-4">Grafik area menunjukkan laju peningkatan pendapatan harian laundry.</p>
+                    </div>
+                    
+                    <div className="h-64 font-mono text-[9px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={daysReportData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="colorPendapatan" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#10B981" stopOpacity={0.2}/>
+                              <stop offset="95%" stopColor="#10B981" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                          <XAxis dataKey="date" tickLine={false} tick={{ fill: '#64748B' }} />
+                          <YAxis tickLine={false} tickFormatter={(val) => `Rp${val/1000}k`} tick={{ fill: '#64748B' }} />
+                          <Tooltip 
+                            formatter={(value: any) => [`Rp ${Number(value).toLocaleString('id-ID')}`, 'Pendapatan']}
+                            contentStyle={{ background: '#0F172A', color: '#FFF', borderRadius: '12px', fontSize: '10px' }}
+                          />
+                          <Area type="monotone" dataKey="Pendapatan" stroke="#10B981" strokeWidth={3} fillOpacity={1} fill="url(#colorPendapatan)" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Chart Card 2: Order Volume Bar Chart */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <h4 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
+                        <Package className="w-4 h-4 text-indigo-500" />
+                        Volume Penerimaan Orderan (Harian)
+                      </h4>
+                      <p className="text-slate-400 text-[10px] mt-0.5 mb-4">Grafik batang mendetail banyaknya nota transaksi yang terbuat harian.</p>
+                    </div>
+
+                    <div className="h-64 font-mono text-[9px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={daysReportData} margin={{ top: 10, right: 10, left: -30, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
+                          <XAxis dataKey="date" tickLine={false} tick={{ fill: '#64748B' }} />
+                          <YAxis tickLine={false} allowDecimals={false} tick={{ fill: '#64748B' }} />
+                          <Tooltip 
+                            formatter={(value: any) => [`${value} Nota`, 'Jumlah Order']}
+                            contentStyle={{ background: '#0F172A', color: '#FFF', borderRadius: '12px', fontSize: '10px' }}
+                          />
+                          <Bar dataKey="Jumlah Order" fill="#6366F1" radius={[4, 4, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Chart Card 3: Payment Method Pie Chart */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-between col-span-1 lg:col-span-2">
+                    <div>
+                      <h4 className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
+                        <QrCode className="w-4 h-4 text-amber-500" />
+                        Saluran Pembayaran Utama (Payment Share)
+                      </h4>
+                      <p className="text-slate-400 text-[10px] mt-0.5 mb-4">Analisis rasio kontribusi dari metode pembayaran (Cash, QRIS, Transfer, Deposit).</p>
+                    </div>
+
+                    <div className="flex flex-col md:flex-row items-center justify-around gap-6">
+                      {/* Pie chart itself */}
+                      <div className="h-56 w-56 relative shrink-0">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={finalPieData}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={60}
+                              outerRadius={80}
+                              paddingAngle={5}
+                              dataKey="value"
+                            >
+                              {finalPieData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip 
+                              formatter={(value: any) => [`Rp ${Number(value).toLocaleString('id-ID')}`, 'Volume']}
+                              contentStyle={{ background: '#0F172A', color: '#FFF', borderRadius: '12px', fontSize: '10px' }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center font-sans">
+                          <span className="text-[9px] text-slate-400 uppercase font-black">Total Volume</span>
+                          <span className="text-xs font-black text-slate-800 mt-0.5">Rp {totalRev.toLocaleString('id-ID')}</span>
+                        </div>
+                      </div>
+
+                      {/* Customized detailed Legend */}
+                      <div className="flex-1 space-y-3 font-sans w-full max-w-md">
+                        {finalPieData.map((dataRow, idx) => {
+                          const percentage = totalRev > 0 ? ((Number(dataRow.value) / totalRev) * 100).toFixed(1) : '0.0';
+                          return (
+                            <div key={dataRow.name} className="flex items-center justify-between border-b border-slate-50 pb-2">
+                              <div className="flex items-center gap-2">
+                                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: PIE_COLORS[idx % PIE_COLORS.length] }}></div>
+                                <span className="text-xs font-bold text-slate-700">{dataRow.name}</span>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-xs font-black text-slate-800 font-mono font-bold">Rp {Number(dataRow.value).toLocaleString('id-ID')}</span>
+                                <span className="text-[10px] text-slate-400 font-bold block">Rasio: {percentage}%</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Transaksional Data Audit Table (Specific to range selection) */}
+                <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden text-xs">
+                  <div className="p-4 bg-slate-50/80 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <h4 className="font-extrabold text-slate-800 text-xs">Audit Transaksi Dalam Rentang Terpilih</h4>
+                      <p className="text-slate-400 text-[10px] mt-0.5">Daftar baris data transaksi yang dicakup visualisasi grafik di atas.</p>
+                    </div>
+                    <span className="px-2.5 py-0.5 rounded-full bg-slate-900 text-white font-mono text-[9px] font-black">
+                      {reportOrders.length} Transaksi Tercakup
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px] bg-slate-50/50">
+                          <th className="p-3 text-left font-bold">No Nota</th>
+                          <th className="p-3 text-left font-bold">Nama Pelanggan</th>
+                          <th className="p-3 text-left font-bold">Rincian Layanan</th>
+                          <th className="p-3 text-center font-bold">Status</th>
+                          <th className="p-3 text-center font-bold">Metode</th>
+                          <th className="p-3 text-right font-bold">Biaya Akhir</th>
+                          <th className="p-3 text-right font-bold">Tanggal Transaksi</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700 font-sans">
+                        {reportOrders.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="text-center py-10 text-slate-400 text-xs">
+                              Tidak ada data transaksi yang tercakup dalam rentang tanggal dan cabang terpilih.
+                            </td>
+                          </tr>
+                        ) : (
+                          reportOrders.map(ord => (
+                            <tr key={ord.id} className="hover:bg-slate-50/50 transition">
+                              <td className="p-3 font-mono font-bold text-slate-900">{ord.invoiceNumber}</td>
+                              <td className="p-3">
+                                <div className="font-medium">{ord.customerName}</div>
+                                <div className="text-[10px] text-slate-400 font-mono">{ord.customerPhone}</div>
+                              </td>
+                              <td className="p-3 text-slate-500 truncate max-w-[200px]" title={ord.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}>
+                                {ord.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}
+                              </td>
+                              <td className="p-3 text-center">
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase ${
+                                  ord.status === OrderStatus.SELESAI ? 'bg-emerald-50 text-emerald-700' : 'bg-indigo-50 text-indigo-700'
+                                }`}>
+                                  {ord.status}
+                                </span>
+                              </td>
+                              <td className="p-3 text-center font-mono font-semibold">
+                                <span className={`px-2 py-0.5 rounded text-[9.5px] font-bold bg-slate-100 text-slate-700`}>
+                                  {ord.paymentMethod}
+                                </span>
+                              </td>
+                              <td className="p-3 text-right font-black text-slate-800">Rp {ord.totalAmount.toLocaleString('id-ID')}</td>
+                              <td className="p-3 text-right text-slate-400 font-mono text-[10px] whitespace-nowrap">
+                                {new Date(ord.createdAt).toLocaleDateString()} {new Date(ord.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+              </div>
+            );
+          })()}
+
         </div>
       )}
 
@@ -3513,6 +4345,229 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
               );
             })}
           </div>
+        </div>
+      )}
+
+      {activeSubTab === 'attendance' && (
+        <div className="space-y-6 animate-fadeIn font-sans">
+          {/* Header & Reload */}
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-5 rounded-3xl border border-slate-100 shadow-sm gap-4">
+            <div>
+              <h2 className="text-lg font-black text-slate-850 flex items-center gap-2">
+                <span className="p-1 px-1.5 rounded-lg bg-indigo-500/10 text-indigo-600">📅</span>
+                Rekap Presensi & Jam Kerja Karyawan
+              </h2>
+              <p className="text-xs text-slate-450 mt-0.5">Pantau kesiapan staf outlet, durasi shift kerja, koordinat presensi, dan rekapitulasi harian.</p>
+            </div>
+            <button
+              onClick={() => {
+                const records = LaughDryDatabase.getAttendance();
+                setAttendanceRecords(records);
+                triggerToast("🔄 Data Absensi Karyawan Diperbarui!");
+              }}
+              className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition active:scale-95"
+            >
+              🔄 Refresh Data
+            </button>
+          </div>
+
+          {/* Filters Bar */}
+          <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Branch Dropdown */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-black text-slate-500 uppercase">Saring Cabang Outlet</label>
+              <select
+                value={selectedBranch}
+                onChange={(e) => {
+                  setSelectedBranch(e.target.value);
+                  setAttendanceStaffFilter('all'); // reset staff filter when branch changes
+                }}
+                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-semibold"
+              >
+                <option value="all">Semua Cabang (Seluruh Outlet)</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Staff Dropdown */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-black text-slate-500 uppercase">Nama Karyawan / Kasir</label>
+              <select
+                value={attendanceStaffFilter}
+                onChange={(e) => setAttendanceStaffFilter(e.target.value)}
+                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-semibold"
+              >
+                <option value="all">Semua Kasir</option>
+                {users
+                  .filter(u => u.role === 'karyawan' && (selectedBranch === 'all' || u.branchId === selectedBranch))
+                  .map(u => (
+                    <option key={u.id} value={u.id}>{u.name}</option>
+                  ))
+                }
+              </select>
+            </div>
+
+            {/* Status Dropdown */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-black text-slate-500 uppercase">Status Kehadiran Sesi</label>
+              <select
+                value={attendanceStatusFilter}
+                onChange={(e) => setAttendanceStatusFilter(e.target.value)}
+                className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 font-semibold"
+              >
+                <option value="all">Semua Status</option>
+                <option value="Hadir">Aktif Bekerja (Check-In)</option>
+                <option value="Selesai">Sudah Checkout (Selesai)</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Metrics Summary Row */}
+          {(() => {
+            // Apply filtering logic
+            const filteredRecords = attendanceRecords.filter(r => {
+              const matchesBranch = selectedBranch === 'all' || r.branchId === selectedBranch;
+              const matchesStaff = attendanceStaffFilter === 'all' || r.userId === attendanceStaffFilter;
+              const matchesStatus = attendanceStatusFilter === 'all' || r.status === attendanceStatusFilter;
+              return matchesBranch && matchesStaff && matchesStatus;
+            });
+
+            const activeWorkingCount = filteredRecords.filter(r => r.status === 'Hadir').length;
+            const completedShiftsCount = filteredRecords.filter(r => r.status === 'Selesai').length;
+            
+            const totalMinutesWorked = filteredRecords
+              .filter(r => r.status === 'Selesai')
+              .reduce((sum, r) => sum + (r.workDuration || 0), 0);
+            
+            const totalHours = Math.floor(totalMinutesWorked / 60);
+            const totalRemainingMinutes = totalMinutesWorked % 60;
+
+            return (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Metric 1 */}
+                  <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">staf aktif bekerja</span>
+                      <div className="text-2xl font-black text-slate-800 mt-1">{activeWorkingCount} Orang</div>
+                      <p className="text-[10.5px] text-slate-400 mt-1">Staf outlet yang saat ini sedang berada di shift aktif.</p>
+                    </div>
+                    <div className="p-3.5 bg-emerald-50 text-emerald-600 rounded-2xl animate-pulse">
+                      <Clock className="w-6 h-6" />
+                    </div>
+                  </div>
+
+                  {/* Metric 2 */}
+                  <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">shif selesai</span>
+                      <div className="text-2xl font-black text-slate-800 mt-1">{completedShiftsCount} Sesi</div>
+                      <p className="text-[10.5px] text-slate-400 mt-1">Sesi kerja harian karyawan yang telah selesai checkout.</p>
+                    </div>
+                    <div className="p-3.5 bg-indigo-50 text-indigo-600 rounded-2xl">
+                      <CheckCircle className="w-6 h-6" />
+                    </div>
+                  </div>
+
+                  {/* Metric 3 */}
+                  <div className="bg-white rounded-3xl p-5 border border-slate-100 shadow-sm flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">total akumulasi durasi</span>
+                      <div className="text-2xl font-black text-slate-800 mt-1">
+                        {totalHours}j {totalRemainingMinutes}m
+                      </div>
+                      <p className="text-[10.5px] text-slate-400 mt-1">Jumlah jam kerja produktif terakumulasi dari seluruh staf.</p>
+                    </div>
+                    <div className="p-3.5 bg-amber-50 text-amber-600 rounded-2xl">
+                      <TrendingUp className="w-6 h-6" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Table of Attendance Records */}
+                <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden text-slate-800">
+                  <div className="p-5 border-b border-slate-100">
+                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Tabel Log Absensi</h3>
+                  </div>
+                  
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 select-none text-[10px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-100">
+                          <th className="p-4 pl-6">Nama Kasir</th>
+                          <th className="p-4">Cabang Outlet</th>
+                          <th className="p-4">Jam Check-In</th>
+                          <th className="p-4">Jam Check-Out</th>
+                          <th className="p-4">Durasi Shift</th>
+                          <th className="p-4">Catatan Operasional</th>
+                          <th className="p-4 pr-6 text-right">Lokasi GPS</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50 text-xs text-slate-700">
+                        {filteredRecords.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="p-8 text-center text-slate-400">
+                              Tidak ada log kehadiran karyawan yang cocok dengan kriteria saringan di atas.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredRecords.map((r, idx) => {
+                            const branchName = branches.find(b => b.id === r.branchId)?.name || 'Cabang Utama';
+                            let checkInStr = '⏳--';
+                            try { if (r.checkIn) checkInStr = new Date(r.checkIn).toLocaleString('id-ID') + ' WIB'; } catch(e) {}
+                            let checkOutStr = '⏳--';
+                            try { if (r.checkOut) checkOutStr = new Date(r.checkOut).toLocaleString('id-ID') + ' WIB'; } catch(e) {}
+                            
+                            return (
+                              <tr key={r.id || idx} className="hover:bg-slate-50/50 transition border-b border-slate-50">
+                                <td className="p-4 pl-6">
+                                  <div className="flex items-center gap-2.5">
+                                    <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center font-bold text-[11px] text-slate-600 border border-slate-200">
+                                      {r.userName?.charAt(0) || 'K'}
+                                    </div>
+                                    <div>
+                                      <span className="font-extrabold text-slate-800 block">{r.userName}</span>
+                                      <span className="text-[10px] text-slate-400 font-mono">ID: {r.userId}</span>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="p-4 font-semibold text-slate-600">
+                                  {branchName}
+                                </td>
+                                <td className="p-4 font-mono text-slate-500 whitespace-nowrap">
+                                  {checkInStr}
+                                </td>
+                                <td className="p-4 font-mono text-slate-500 whitespace-nowrap">
+                                  {r.status === 'Hadir' ? (
+                                    <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 border border-emerald-100 text-[10px] font-bold rounded-lg animate-pulse inline-block">
+                                      Sedang Berjalan
+                                    </span>
+                                  ) : (
+                                    checkOutStr
+                                  )}
+                                </td>
+                                <td className="p-4 font-mono font-bold text-slate-700 whitespace-nowrap">
+                                  {r.status === 'Hadir' ? '⏳ Aktif' : `${Math.floor((r.workDuration || 0) / 60)}j ${(r.workDuration || 0) % 60}m`}
+                                </td>
+                                <td className="p-4 max-w-xs text-slate-500 truncate italic" title={r.notes}>
+                                  {r.notes || '-'}
+                                </td>
+                                <td className="p-4 pr-6 text-right font-mono text-[10.5px] text-rose-500 whitespace-nowrap">
+                                  📍 {r.latLong || '-'}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
         </div>
       )}
 

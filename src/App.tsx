@@ -19,6 +19,7 @@ import {
   Moon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Capacitor } from '@capacitor/core';
 import OwnerDashboard from './components/OwnerDashboard';
 import EmployeeConsole from './components/EmployeeConsole';
 import CustomerTracking from './components/CustomerTracking';
@@ -26,7 +27,13 @@ import PRDDocument from './components/PRDDocument';
 import { LaughDryDatabase } from './data/mockDatabase';
 
 export default function App() {
-  const [activeConsole, setActiveConsole] = useState<'owner' | 'karyawan' | 'pelanggan'>('owner');
+  const [isAndroidApp] = useState<boolean>(() => {
+    return Capacitor.isNativePlatform() || window.location.search.includes('platform=android');
+  });
+  const [activeConsole, setActiveConsole] = useState<'owner' | 'karyawan' | 'pelanggan'>(() => {
+    const isApp = Capacitor.isNativePlatform() || window.location.search.includes('platform=android');
+    return isApp ? 'karyawan' : 'owner';
+  });
   const [currentTime, setCurrentTime] = useState<string>('');
   const [isSyncing, setIsSyncing] = useState<boolean>(true);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -147,11 +154,13 @@ export default function App() {
                 <span className="font-extrabold text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-200 bg-clip-text text-transparent">
                   LaughDry
                 </span>
-                <span className="text-[10px] bg-sky-500/20 text-[#38BDF8] font-bold px-1.5 py-0.5 rounded uppercase border border-sky-500/30">
-                  Kita v2.0
+                <span className="text-[10px] bg-slate-500/20 text-[#38BDF8] font-bold px-1.5 py-0.5 rounded uppercase border border-slate-500/30">
+                  {isAndroidApp ? 'Android App v2.0' : 'Kita v2.0'}
                 </span>
               </div>
-              <p className="text-[10.5px] text-slate-400 font-medium">Sistem POS & Analitik Laundry Kelas Dunia</p>
+              <p className="text-[10.5px] text-slate-400 font-medium">
+                {isAndroidApp ? 'Aplikasi POS Layanan & Absensi Toko' : 'Sistem POS & Analitik Laundry Kelas Dunia'}
+              </p>
             </div>
           </div>
 
@@ -159,7 +168,7 @@ export default function App() {
           <div className="flex items-center gap-5 text-xs text-slate-400">
             <div className="hidden lg:flex items-center gap-1.5 font-mono">
               <span className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-amber-400 animate-pulse' : 'bg-green-400 animate-ping'}`}></span>
-              <span className="text-[11px] text-slate-300 font-bold uppercase text-slate-200">
+              <span className="text-[11px] font-bold uppercase text-slate-200">
                 {isSyncing ? 'Firestore: Menyelaraskan...' : 'Firestore: Aktif & Sinkron'}
               </span>
             </div>
@@ -188,11 +197,15 @@ export default function App() {
         <div className="max-w-7xl mx-auto flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-0.5">
             <strong className="text-slate-800 text-xs font-black uppercase tracking-wider block">Pilih Portal Akses:</strong>
-            <p className="text-[11px] text-slate-400 select-none">Pilih menu layanan di bawah ini untuk mengakses Dasbor Owner, Aplikasi POS Karyawan Kasir, atau Portal Pelacakan Mandiri Pelanggan.</p>
+            <p className="text-[11px] text-slate-400 select-none">
+              {isAndroidApp 
+                ? 'Portal Android aktif. Kelola pesanan baru, catat pengeluaran, lakukan absensi, atau pantau performa bisnis sebagai owner.'
+                : 'Pilih menu layanan di bawah ini untuk mengakses Dasbor Owner, Aplikasi POS Karyawan Kasir, atau Portal Pelacakan Mandiri Pelanggan.'}
+            </p>
           </div>
 
           {/* Action Selector Grid Tab */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 w-full lg:w-auto">
+          <div className={`grid ${isAndroidApp ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'} gap-2 w-full lg:w-auto`}>
             {/* Owner Button */}
             <button
               onClick={() => setActiveConsole('owner')}
@@ -221,19 +234,21 @@ export default function App() {
               POS Karyawan
             </button>
 
-            {/* Customer Tracking Button */}
-            <button
-              onClick={() => setActiveConsole('pelanggan')}
-              className={`flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-xl text-xs font-bold transition-all md:col-span-1 col-span-2 ${
-                activeConsole === 'pelanggan'
-                  ? 'bg-[#1E293B] text-[#38BDF8] shadow-md shadow-[#38BDF8]/10 scale-[1.02]'
-                  : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'
-              }`}
-              id="role-switch-customer"
-            >
-              <Globe className="w-4 h-4" />
-              Situs Tracking
-            </button>
+            {/* Customer Tracking Button - Web only */}
+            {!isAndroidApp && (
+              <button
+                onClick={() => setActiveConsole('pelanggan')}
+                className={`flex items-center justify-center gap-2 py-2.5 px-3.5 rounded-xl text-xs font-bold transition-all md:col-span-1 col-span-2 ${
+                  activeConsole === 'pelanggan'
+                    ? 'bg-[#1E293B] text-[#38BDF8] shadow-md shadow-[#38BDF8]/10 scale-[1.02]'
+                    : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'
+                }`}
+                id="role-switch-customer"
+              >
+                <Globe className="w-4 h-4" />
+                Situs Tracking
+              </button>
+            )}
           </div>
         </div>
       </div>
